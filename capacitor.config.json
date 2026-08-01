@@ -1,0 +1,17 @@
+{
+  "appId": "com.lavillastjean.villaApp",
+  "appName": "VillaApp",
+  "webDir": "dist",
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 3000,
+      "launchAutoHide": true,
+      "launchFadeOutDuration": 300,
+      "backgroundColor": "#8D162F",
+      "androidScaleType": "CENTER_CROP",
+      "showSpinner": false,
+      "splashDuration": 3000,
+      "fadeSplash": true
+    }
+  }
+}
