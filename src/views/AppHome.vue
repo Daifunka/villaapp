@@ -4,8 +4,12 @@ import { App } from '@capacitor/app'
 import foodFallback from '../assets/img/food.png'
 import drinkFallback from '../assets/img/drink.png'
 import { checkSelfHostedUpdates } from '../utils/updater'
+import VideoSection from '../components/home/VideoSection.vue'
+import MenuCard from '../components/menu/MenuCard.vue'
+import ProductDetailDialog from '../components/menu/ProductDetailDialog.vue'
 
 export default {
+  components: { MenuCard, ProductDetailDialog, VideoSection },
   data() {
     return {
       foodFallback,
@@ -47,9 +51,13 @@ export default {
       showConfirmOrderModal: false,
       showWifiDialog: false,
       showFullAnnonceDialog: false,
+      showProductDialog: false,
+      selectedMenuItem: null,
       annonceInterval: null,
       appStateListener: null,
       visibilityListener: null,
+      scrollFrame: null,
+      pendingScrollTop: 0,
     }
   },
   async created() {
@@ -112,10 +120,10 @@ export default {
 
       const layout = document.querySelector('.q-layout')
       if (layout) {
-        layout.addEventListener('scroll', this.handleScroll)
+        layout.addEventListener('scroll', this.queueScrollUpdate, { passive: true })
       }
     })
-    window.addEventListener('scroll', this.handleScroll, true)
+    window.addEventListener('scroll', this.queueScrollUpdate, { passive: true })
     window.addEventListener('resize', this.checkTabsScroll)
     window.addEventListener('online', this.handleOnlineTransition)
 
@@ -147,12 +155,12 @@ export default {
     }, 300000) // 5 minutes
   },
   unmounted() {
-    window.removeEventListener('scroll', this.handleScroll, true)
+    window.removeEventListener('scroll', this.queueScrollUpdate)
     window.removeEventListener('resize', this.checkTabsScroll)
     window.removeEventListener('online', this.handleOnlineTransition)
     const layout = document.querySelector('.q-layout')
     if (layout) {
-      layout.removeEventListener('scroll', this.handleScroll)
+      layout.removeEventListener('scroll', this.queueScrollUpdate)
     }
     if (this.occupationInterval) {
       clearInterval(this.occupationInterval)
@@ -169,6 +177,9 @@ export default {
     if (this.domObserver) {
       this.domObserver.disconnect()
     }
+    if (this.scrollFrame) {
+      cancelAnimationFrame(this.scrollFrame)
+    }
   },
   watch: {
     '$store.state.videos'(newCategories) {
@@ -176,15 +187,7 @@ export default {
       this.translateCurrentDOM()
     },
     articles(newVal) {
-      console.log('=== DEBUG ARTICLES ===');
-      console.log('Raw articles:', newVal);
-      if (Array.isArray(newVal)) {
-        console.log('Sources present in articles:', [...new Set(newVal.map(t => t.source))]);
-        const guesthouse = newVal.filter(t => t.source === 'Guesthouse');
-        console.log('Guesthouse items raw:', guesthouse);
-        console.log('Guesthouse mapped (nom, source):', guesthouse.map(t => ({ nom: t.nom, source: t.source, keys: Object.keys(t) })));
-      }
-      console.log('======================');
+      if (!newVal) return
       this.translateCurrentDOM()
     },
     menuType() {
@@ -329,6 +332,10 @@ export default {
     },
     ouvrirReglages() {
       this.showSettingsModal = true
+    },
+    ouvrirProduit(article) {
+      this.selectedMenuItem = article
+      this.showProductDialog = true
     },
     ajouterPanier(article) {
       this.success = false
@@ -581,19 +588,23 @@ export default {
     chargerPlusArticles() {
       this.itemsToShow += 14
     },
-    handleScroll(e) {
-      let scrollTop = 0
+    queueScrollUpdate(e) {
       if (e && e.target && e.target !== window && e.target !== document) {
-        scrollTop = e.target.scrollTop
+        this.pendingScrollTop = e.target.scrollTop
       } else {
-        scrollTop =
+        this.pendingScrollTop =
           window.scrollY ||
           window.pageYOffset ||
           document.documentElement.scrollTop ||
           document.body.scrollTop
       }
-      this.isScrolled = scrollTop > 50
-      this.showBackToTop = scrollTop > 300
+
+      if (this.scrollFrame) return
+      this.scrollFrame = requestAnimationFrame(() => {
+        this.isScrolled = this.pendingScrollTop > 50
+        this.showBackToTop = this.pendingScrollTop > 300
+        this.scrollFrame = null
+      })
     },
     scrollToTop() {
       const scrollOptions = { top: 0, behavior: 'smooth' }
@@ -605,7 +616,7 @@ export default {
       layouts.forEach((el) => {
         try {
           el.scrollTo(scrollOptions)
-        } catch (err) {
+        } catch {
           el.scrollTop = 0
         }
       })
@@ -728,6 +739,9 @@ export default {
     articles() {
       return this.$store.state.menus || []
     },
+    selectedProductImage() {
+      return this.getArticleImage(this.selectedMenuItem)
+    },
     articlesFiltres2() {
       if (this.articles) {
         return this.articles.filter((tache) => tache.source === 'Guesthouse')
@@ -735,9 +749,7 @@ export default {
       return []
     },
     chambresOptions() {
-      const res = this.articlesFiltres2.map((a) => a.nom)
-      console.log('chambresOptions computed value:', res)
-      return res
+      return this.articlesFiltres2.map((a) => a.nom)
     },
     onglets() {
       const dynamicPages = this.$store.state.dynamicPages || []
@@ -1165,47 +1177,13 @@ export default {
         <q-tab-panels v-model="page" animated class="bg-transparent" swipeable>
           <!-- Tab: Default (Video) for dynamic page names -->
           <q-tab-panel v-for="t in dynamicTabNames" :key="t" :name="t" class="q-pa-none">
-            <div
-              v-if="videos === null"
-              class="text-center q-pa-xl animate__animated animate__fadeIn"
-            >
-              <q-img
-                src="../assets/img/chic_empty_state.png"
-                width="220px"
-                class="q-mb-lg opacity-80"
-              />
-              <div class="text-grey-8 text-subtitle1 text-weight-medium">
-                Une erreur s'est produite lors de la récupération du contenu.
-              </div>
-              <div class="text-grey-6 text-caption q-mt-sm">
-                Nous travaillons pour rétablir ce contenu très bientôt.
-              </div>
-            </div>
-
-            <div v-else-if="videos === ''" class="text-center q-pa-xl q-my-xl">
-              <q-spinner color="primary" size="3em" />
-              <div class="text-primary q-mt-md text-weight-bold">Chargement en cours</div>
-            </div>
-
-            <div v-else class="video-container q-mb-lg">
-              <vue-plyr class="custom-plyr">
-                <video playsinline controls crossorigin>
-                  <source :src="link + videos.video_url" type="video/mp4" />
-                </video>
-              </vue-plyr>
-            </div>
-            <div
-              v-if="videos && videos.description"
-              class="video-description text-grey-8 q-mt-sm q-mb-lg leading-relaxed"
-              style="
-                font-size: 1rem;
-                white-space: pre-line;
-                font-family: 'Outfit', sans-serif;
-                padding: 0 4px;
-              "
-            >
-              {{ videos.description }}
-            </div>
+            <VideoSection
+              v-if="page === t"
+              :base-url="link"
+              :language="langue"
+              :section="t"
+              :video="videos"
+            />
 
             <!-- FAQs Accordion Component -->
             <div
@@ -1221,7 +1199,7 @@ export default {
 
               <q-list class="premium-faq-list q-gutter-y-sm">
                 <q-expansion-item
-                  v-for="(faq, fIndex) in faqs"
+                  v-for="faq in faqs"
                   :key="faq.id"
                   class="premium-faq-card overflow-hidden shadow-1"
                   header-class="text-weight-bold text-dark q-py-md text-subtitle1"
@@ -1293,58 +1271,16 @@ export default {
                   <div
                     class="col-12 col-sm-6 col-md-4 col-lg-3"
                     v-for="(article, index) in articlesFiltres"
-                    :key="index"
+                    :key="article.id || `${article.source}-${article.nom}`"
                   >
-                    <q-card
-                      class="menu-card full-height"
-                      flat
-                      bordered
-                      :style="{ animationDelay: (index % 14) * 0.02 + 's' }"
-                    >
-                      <div class="menu-card-inner">
-                        <!-- Image container -->
-                        <div class="menu-image-container">
-                          <q-img
-                            :src="getArticleImage(article)"
-                            class="menu-img"
-                            :fit="article.imageMenu ? 'cover' : 'contain'"
-                            loading="lazy"
-                          >
-                            <template v-slot:error>
-                              <q-img
-                                v-if="article.source === 'Bar'"
-                                src="../assets/img/drink.png"
-                                class="menu-img"
-                                fit="contain"
-                              />
-                              <q-img
-                                v-else
-                                src="../assets/img/food.png"
-                                class="menu-img"
-                                fit="contain"
-                              />
-                            </template>
-                          </q-img>
-                        </div>
-
-                        <!-- Content container -->
-                        <div class="menu-info-container">
-                          <div class="menu-item-title ellipsis-2-lines">{{ article.nom }}</div>
-
-                          <div class="menu-action-row">
-                            <div class="menu-item-price">{{ article.prix }} F</div>
-                            <q-btn
-                              round
-                              size="sm"
-                              icon="sym_o_add"
-                              unelevated
-                              class="add-to-cart-btn"
-                              @click.prevent="ajouterPanier(article)"
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    </q-card>
+                    <MenuCard
+                      :image-url="getArticleImage(article)"
+                      :index="index"
+                      :item="article"
+                      :language="langue"
+                      @add="ajouterPanier"
+                      @select="ouvrirProduit"
+                    />
                   </div>
                 </div>
 
@@ -1637,6 +1573,14 @@ export default {
     </div>
 
     <!-- Settings Dialog -->
+    <ProductDetailDialog
+      v-model="showProductDialog"
+      :image-url="selectedProductImage"
+      :item="selectedMenuItem"
+      :language="langue"
+      @add="ajouterPanier"
+    />
+
     <q-dialog v-model="showSettingsModal" :persistent="!bloc || !chambre">
       <q-card class="settings-card" style="min-width: 350px; border-radius: 24px">
         <q-card-section class="row items-center q-pb-none">
@@ -1941,20 +1885,6 @@ export default {
   -webkit-overflow-scrolling: touch !important;
 }
 
-/* GPU Hardware acceleration for cards and images to ensure native-like rendering speed */
-.q-card,
-.menu-item,
-.menu-card,
-.article-card,
-img,
-.q-img {
-  backface-visibility: hidden;
-  -webkit-backface-visibility: hidden;
-  transform: translate3d(0, 0, 0);
-  -webkit-transform: translate3d(0, 0, 0);
-  will-change: transform;
-}
-
 /* Avoid visual line artifact on the left during tab panel slide transitions */
 .q-tab-panels,
 .q-tab-panel,
@@ -1963,7 +1893,6 @@ img,
   outline: none !important;
   box-shadow: none !important;
   overflow: hidden !important;
-  will-change: transform;
   -webkit-backface-visibility: hidden;
   backface-visibility: hidden;
 }
@@ -1976,9 +1905,7 @@ img,
   right: 0;
   height: 120px;
   z-index: 1998;
-  background: rgba(255, 255, 255, 0.45);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.97), rgba(255, 255, 255, 0.78));
   pointer-events: none;
   -webkit-mask-image: linear-gradient(to bottom, black 0%, black 65%, transparent 100%);
   mask-image: linear-gradient(to bottom, black 0%, black 65%, transparent 100%);
@@ -2717,13 +2644,7 @@ body {
   position: relative;
   z-index: 10;
   min-height: 60vh;
-  background: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.88) 0%,
-    rgba(255, 255, 255, 0.98) 100%
-  ) !important;
-  backdrop-filter: blur(30px);
-  -webkit-backdrop-filter: blur(30px);
+  background: #ffffff !important;
   border-top: 1px solid rgba(141, 22, 47, 0.08) !important;
   box-shadow: 0 -20px 40px rgba(141, 22, 47, 0.02);
   padding-top: 10px;
