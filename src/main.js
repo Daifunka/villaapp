@@ -1,10 +1,9 @@
 
 import { createApp } from 'vue'
+import { Capacitor } from '@capacitor/core'
+import { SplashScreen } from '@capacitor/splash-screen'
 import App from './App.vue'
 import { notifyAppReady } from './utils/updater'
-
-// Declare app ready to Capgo to validate downloaded bundle and prevent rollback
-notifyAppReady()
 import router from './router'
 import store from './store'
 import VCalendar from 'v-calendar';
@@ -57,5 +56,39 @@ app.use(Quasar, {
       ]
     }
   })
+  const splashStartedAt = performance.now()
+  let splashHidden = false
+
+  const hideLaunchSplash = async () => {
+    if (splashHidden || !Capacitor.isNativePlatform()) return
+
+    splashHidden = true
+
+    try {
+      await SplashScreen.hide()
+    } catch (error) {
+      console.warn('[SplashScreen] Unable to hide launch splash:', error)
+    }
+  }
+
   app.mount('#app')
 
+  if (Capacitor.isNativePlatform()) {
+    // Keep a short minimum display to avoid a flash on fast devices, then
+    // reveal the app only once the initial route has rendered.
+    router.isReady().then(() => {
+      // Validate the loaded Capgo bundle only after Vue has rendered successfully.
+      void notifyAppReady()
+      const minimumDisplayTime = 900
+      const remainingTime = Math.max(0, minimumDisplayTime - (performance.now() - splashStartedAt))
+
+      window.setTimeout(() => {
+        window.requestAnimationFrame(() => hideLaunchSplash())
+      }, remainingTime)
+    })
+
+    // Safety fallback: never leave users stuck behind the splash screen.
+    window.setTimeout(() => hideLaunchSplash(), 2500)
+  } else {
+    void router.isReady().then(() => notifyAppReady())
+  }

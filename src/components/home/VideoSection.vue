@@ -97,7 +97,7 @@ watch(remoteUrl, (url) => void resolve(url), { immediate: true })
         </span>
       </div>
 
-      <div class="video-context">
+      <div class="video-context notranslate" translate="no">
         <q-icon name="sym_o_info" size="20px" aria-hidden="true" />
         <p>{{ description }}</p>
       </div>

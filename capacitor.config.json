@@ -4,14 +4,13 @@
   "webDir": "dist",
   "plugins": {
     "SplashScreen": {
-      "launchShowDuration": 3000,
-      "launchAutoHide": true,
-      "launchFadeOutDuration": 300,
-      "backgroundColor": "#8D162F",
-      "androidScaleType": "CENTER_CROP",
-      "showSpinner": false,
-      "splashDuration": 3000,
-      "fadeSplash": true
+      "launchShowDuration": 2500,
+      "launchAutoHide": false,
+      "launchFadeOutDuration": 250,
+      "backgroundColor": "#8D162FFF",
+      "androidSplashResourceName": "splash",
+      "androidScaleType": "CENTER_INSIDE",
+      "showSpinner": false
     }
   }
 }

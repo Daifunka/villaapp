@@ -1,126 +1,216 @@
-import { Capacitor } from '@capacitor/core'
-import { CapacitorUpdater } from '@capgo/capacitor-updater'
 import { App } from '@capacitor/app'
+import { Browser } from '@capacitor/browser'
+import { Capacitor } from '@capacitor/core'
 import { Preferences } from '@capacitor/preferences'
+import { CapacitorUpdater } from '@capgo/capacitor-updater'
 
-// Register background resume listener on native platforms
-if (Capacitor.isNativePlatform()) {
-  App.addListener('appStateChange', ({ isActive }) => {
-    if (isActive) {
-      console.log('[Updater] App returned to foreground. Checking for updates...')
-      checkSelfHostedUpdates()
-    }
-  })
-}
+export const UPDATE_MANIFEST_URL =
+  'https://dashbaord.lavillastjean.com/updates/version.json'
 
-/**
- * Declares the application as successfully loaded to Capgo.
- * This commits the downloaded bundle and prevents automatic rollback to built-in.
- */
-export async function notifyAppReady() {
-  if (Capacitor.isNativePlatform()) {
-    try {
-      await CapacitorUpdater.notifyAppReady()
-      console.log('[Updater] App successfully loaded and declared ready to CapacitorUpdater.')
-    } catch (error) {
-      console.error('[Updater] Failed to declare app ready:', error)
-    }
+const ATTEMPTED_WEB_VERSION_KEY = 'update.attemptedWebVersion'
+const FAILED_WEB_VERSION_KEY = 'update.failedWebVersion'
+const LEGACY_ATTEMPTED_VERSION_KEY = 'attemptedVersion'
+const LEGACY_FAILED_VERSION_KEY = 'lastFailedVersion'
+
+function parseVersion(version) {
+  const normalized = String(version ?? '')
+    .trim()
+    .replace(/^v/i, '')
+  const [core = '0.0.0', prerelease = ''] = normalized.split('-', 2)
+
+  return {
+    core: core.split('.').map((part) => Number.parseInt(part, 10) || 0),
+    prerelease,
   }
 }
 
-/**
- * Checks, downloads and applies updates from the hotel's self-hosted server dashboard.
- * Implements a rollback-safeguard using Preferences to avoid infinite reload loops when ZIP files are invalid.
- */
-export async function checkSelfHostedUpdates() {
-  // Only execute on native platforms (iOS/Android) to prevent errors in browser debug mode
-  if (!Capacitor.isNativePlatform()) {
-    console.log('[Updater] Skipping update check: Not running on a native platform.')
+export function compareVersions(leftVersion, rightVersion) {
+  const left = parseVersion(leftVersion)
+  const right = parseVersion(rightVersion)
+  const length = Math.max(left.core.length, right.core.length)
+
+  for (let index = 0; index < length; index += 1) {
+    const leftPart = left.core[index] ?? 0
+    const rightPart = right.core[index] ?? 0
+
+    if (leftPart !== rightPart) return leftPart > rightPart ? 1 : -1
+  }
+
+  if (left.prerelease === right.prerelease) return 0
+  if (!left.prerelease) return 1
+  if (!right.prerelease) return -1
+  return left.prerelease.localeCompare(right.prerelease, undefined, { numeric: true })
+}
+
+function normalizeManifest(payload) {
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('Le manifeste de mise à jour est invalide.')
+  }
+
+  const webPayload = payload.web ?? payload
+  const web = {
+    version: String(webPayload.version ?? payload.version ?? '').trim(),
+    url: String(webPayload.url ?? payload.url ?? '').trim(),
+    checksum: String(webPayload.checksum ?? payload.checksum ?? '').trim(),
+    minNativeBuild: Number(webPayload.minNativeBuild ?? payload.minNativeBuild ?? 0),
+  }
+
+  if (!web.version || !web.url) {
+    throw new Error('Le manifeste ne contient pas de bundle web valide.')
+  }
+
+  const androidPayload = payload.android
+  const android = androidPayload
+    ? {
+        versionCode: Number(androidPayload.versionCode ?? 0),
+        versionName: String(androidPayload.versionName ?? '').trim(),
+        apkUrl: String(androidPayload.apkUrl ?? '').trim(),
+        sha256: String(androidPayload.sha256 ?? '').trim(),
+        mandatory: Boolean(androidPayload.mandatory),
+        releaseNotes: androidPayload.releaseNotes ?? {},
+      }
+    : null
+
+  return {
+    schemaVersion: Number(payload.schemaVersion ?? 1),
+    web,
+    android,
+  }
+}
+
+async function fetchUpdateManifest() {
+  const response = await fetch(UPDATE_MANIFEST_URL, {
+    cache: 'no-store',
+    headers: { Accept: 'application/json' },
+  })
+
+  if (!response.ok) {
+    throw new Error(`Le serveur de mise à jour a répondu ${response.status}.`)
+  }
+
+  return normalizeManifest(await response.json())
+}
+
+async function getCurrentWebVersion() {
+  const current = await CapacitorUpdater.current()
+  const bundleVersion = current.bundle?.version
+
+  if (bundleVersion && bundleVersion !== 'builtin') return bundleVersion
+  return current.native || '0.0.0'
+}
+
+async function reconcilePreviousWebUpdate(currentVersion) {
+  const [{ value: attemptedVersion }, { value: legacyAttemptedVersion }] = await Promise.all([
+    Preferences.get({ key: ATTEMPTED_WEB_VERSION_KEY }),
+    Preferences.get({ key: LEGACY_ATTEMPTED_VERSION_KEY }),
+  ])
+  const attempted = attemptedVersion || legacyAttemptedVersion
+
+  if (!attempted) return
+
+  if (attempted === currentVersion) {
+    await Promise.all([
+      Preferences.remove({ key: ATTEMPTED_WEB_VERSION_KEY }),
+      Preferences.remove({ key: FAILED_WEB_VERSION_KEY }),
+      Preferences.remove({ key: LEGACY_ATTEMPTED_VERSION_KEY }),
+      Preferences.remove({ key: LEGACY_FAILED_VERSION_KEY }),
+    ])
     return
   }
 
+  console.warn(`[Updater] Rollback détecté pour le bundle ${attempted}.`)
+  await Promise.all([
+    Preferences.set({ key: FAILED_WEB_VERSION_KEY, value: attempted }),
+    Preferences.set({ key: LEGACY_FAILED_VERSION_KEY, value: attempted }),
+    Preferences.remove({ key: ATTEMPTED_WEB_VERSION_KEY }),
+    Preferences.remove({ key: LEGACY_ATTEMPTED_VERSION_KEY }),
+  ])
+}
+
+async function applyWebUpdate(webUpdate, currentWebVersion, currentNativeBuild) {
+  if (webUpdate.minNativeBuild > currentNativeBuild) {
+    console.info(
+      `[Updater] Bundle ${webUpdate.version} réservé au build natif ${webUpdate.minNativeBuild} ou supérieur.`,
+    )
+    return false
+  }
+
+  if (compareVersions(webUpdate.version, currentWebVersion) <= 0) return false
+
+  const [{ value: failedVersion }, { value: legacyFailedVersion }] = await Promise.all([
+    Preferences.get({ key: FAILED_WEB_VERSION_KEY }),
+    Preferences.get({ key: LEGACY_FAILED_VERSION_KEY }),
+  ])
+
+  if (webUpdate.version === (failedVersion || legacyFailedVersion)) {
+    console.warn(`[Updater] Le bundle ${webUpdate.version} a déjà échoué. Mise à jour ignorée.`)
+    return false
+  }
+
+  await Preferences.set({ key: ATTEMPTED_WEB_VERSION_KEY, value: webUpdate.version })
+
   try {
-    // 1. Get currently active version on the app
-    const currentInfo = await CapacitorUpdater.current()
-    
-    // Support multiple Capgo version schemas (direct id, bundle.id, or version field)
-    let currentVersion = currentInfo.native || '1.0'
-    if (currentInfo.id && currentInfo.id !== 'builtin') {
-      currentVersion = currentInfo.id
-    } else if (currentInfo.bundle && currentInfo.bundle.id && currentInfo.bundle.id !== 'builtin') {
-      currentVersion = currentInfo.bundle.id
-    } else if (currentInfo.version && currentInfo.version !== 'builtin') {
-      currentVersion = currentInfo.version
-    }
-
-    // 2. Check if the previous attempt failed and triggered a plugin rollback
-    const { value: attemptedVersion } = await Preferences.get({ key: 'attemptedVersion' })
-    if (attemptedVersion && attemptedVersion !== currentVersion) {
-      console.warn(`[Updater] Detected rollback! Update to ${attemptedVersion} failed to boot. Marking version as failed.`)
-      await Preferences.set({ key: 'lastFailedVersion', value: attemptedVersion })
-      await Preferences.remove({ key: 'attemptedVersion' })
-    } else if (attemptedVersion && attemptedVersion === currentVersion) {
-      // Success! Clean up tracking variables
-      await Preferences.remove({ key: 'attemptedVersion' })
-      await Preferences.remove({ key: 'lastFailedVersion' })
-    }
-
-    const { value: lastFailedVersion } = await Preferences.get({ key: 'lastFailedVersion' })
-
-    console.log('[Updater] Starting update check...')
-    // 3. Fetch version info from public dashboard endpoint
-    const response = await fetch('https://dashbaord.lavillastjean.com/updates/version.json', {
-      cache: 'no-store',
+    const bundle = await CapacitorUpdater.download({
+      url: webUpdate.url,
+      version: webUpdate.version,
+      ...(webUpdate.checksum ? { checksum: webUpdate.checksum } : {}),
     })
 
-    if (!response.ok) {
-      console.warn('[Updater] Failed to retrieve updates config from server:', response.statusText)
-      return
-    }
-
-    const serverUpdate = await response.json()
-    if (!serverUpdate || !serverUpdate.version || !serverUpdate.url) {
-      console.warn('[Updater] Invalid update format returned by server.')
-      return
-    }
-
-    // 4. Prevent loop if the server version has already failed and rolled back
-    if (serverUpdate.version === lastFailedVersion) {
-      console.warn(`[Updater] Server version ${serverUpdate.version} previously failed and rolled back. Skipping to prevent infinite reload loop.`)
-      return
-    }
-
-    console.log(
-      `[Updater] Current version: ${currentVersion}, Server version: ${serverUpdate.version}`,
-    )
-
-    // If version is different, trigger update
-    if (serverUpdate.version !== currentVersion) {
-      console.log(
-        `[Updater] New version detected! Downloading update zip from ${serverUpdate.url}...`,
-      )
-
-      // Store the version we are attempting to download
-      await Preferences.set({ key: 'attemptedVersion', value: serverUpdate.version })
-
-      // 5. Download the zipped assets
-      const downloadResult = await CapacitorUpdater.download({
-        url: serverUpdate.url,
-        version: serverUpdate.version,
-      })
-
-      console.log('[Updater] Download complete. Setting active version...')
-
-      // 6. Set the new version active and reload webview immediately to apply
-      await CapacitorUpdater.set(downloadResult)
-      console.log(
-        `[Updater] Active version successfully set to ${serverUpdate.version}. Reloading app...`,
-      )
-      await CapacitorUpdater.reload()
-    } else {
-      console.log('[Updater] App is already up to date.')
-    }
+    await CapacitorUpdater.set({ id: bundle.id })
+    return true
   } catch (error) {
-    console.error('[Updater] Error checking/performing self-hosted updates:', error)
+    await Preferences.remove({ key: ATTEMPTED_WEB_VERSION_KEY })
+    throw error
   }
+}
+
+export async function notifyAppReady() {
+  if (!Capacitor.isNativePlatform()) return
+
+  try {
+    await CapacitorUpdater.notifyAppReady()
+  } catch (error) {
+    console.error('[Updater] Impossible de confirmer le chargement du bundle :', error)
+  }
+}
+
+export async function checkSelfHostedUpdates() {
+  if (!Capacitor.isNativePlatform()) {
+    return { nativeUpdate: null, manifest: null }
+  }
+
+  try {
+    const [manifest, appInfo, currentWebVersion] = await Promise.all([
+      fetchUpdateManifest(),
+      App.getInfo(),
+      getCurrentWebVersion(),
+    ])
+    const currentNativeBuild = Number.parseInt(appInfo.build, 10) || 0
+
+    await reconcilePreviousWebUpdate(currentWebVersion)
+
+    const nativeUpdate =
+      manifest.android?.apkUrl && manifest.android.versionCode > currentNativeBuild
+        ? {
+            ...manifest.android,
+            currentVersionCode: currentNativeBuild,
+            currentVersionName: appInfo.version,
+          }
+        : null
+
+    await applyWebUpdate(manifest.web, currentWebVersion, currentNativeBuild)
+
+    return { nativeUpdate, manifest }
+  } catch (error) {
+    console.warn('[Updater] Vérification impossible, l’application continue normalement :', error)
+    return { nativeUpdate: null, manifest: null, error }
+  }
+}
+
+export async function openNativeUpdate(apkUrl) {
+  if (!Capacitor.isNativePlatform() || !/^https:\/\//i.test(apkUrl)) {
+    throw new Error('Lien APK invalide ou plateforme non prise en charge.')
+  }
+
+  await Browser.open({ url: apkUrl })
 }

@@ -1,5 +1,9 @@
 apply plugin: 'com.android.application'
 
+def villaVersionCode = Integer.parseInt((project.findProperty('villaVersionCode') ?: '4').toString())
+def villaVersionName = (project.findProperty('villaVersionName') ?: '1.0.7').toString()
+def releaseKeystorePath = System.getenv('ANDROID_KEYSTORE_PATH')
+
 android {
     namespace "com.lavillastjean.villaApp"
     compileSdk rootProject.ext.compileSdkVersion
@@ -7,8 +11,8 @@ android {
         applicationId "com.lavillastjean.villaApp"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 4
-        versionName "1.0.7"
+        versionCode villaVersionCode
+        versionName villaVersionName
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,8 +20,21 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            if (releaseKeystorePath) {
+                storeFile file(releaseKeystorePath)
+                storePassword System.getenv('ANDROID_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('ANDROID_KEY_ALIAS')
+                keyPassword System.getenv('ANDROID_KEY_PASSWORD')
+            }
+        }
+    }
     buildTypes {
         release {
+            if (releaseKeystorePath) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

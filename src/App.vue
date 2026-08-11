@@ -1,12 +1,18 @@
 <script setup>
 import { RouterView } from 'vue-router'
-/*
-import { computed } from 'vue'
-import { useStore } from 'vuex'
+import AppUpdateDialog from '@/components/update/AppUpdateDialog.vue'
+import { useAppUpdate } from '@/composables/useAppUpdate'
 
-const store = useStore()
-
-const authChecked = computed(() => store.state.authChecked) */
+const {
+  nativeUpdate,
+  isDialogOpen,
+  isOpeningDownload,
+  isMandatory,
+  errorMessage,
+  language,
+  remindLater,
+  downloadNativeUpdate,
+} = useAppUpdate()
 </script>
 
 <template>
@@ -15,6 +21,17 @@ const authChecked = computed(() => store.state.authChecked) */
       <RouterView></RouterView>
     </q-page-container>
   </q-layout>
+
+  <AppUpdateDialog
+    v-model="isDialogOpen"
+    :update="nativeUpdate"
+    :mandatory="isMandatory"
+    :loading="isOpeningDownload"
+    :error-message="errorMessage"
+    :language="language"
+    @later="remindLater"
+    @update="downloadNativeUpdate"
+  />
 </template>
 
 <style>

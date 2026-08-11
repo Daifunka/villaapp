@@ -3,13 +3,21 @@ import { Preferences } from '@capacitor/preferences'
 import { App } from '@capacitor/app'
 import foodFallback from '../assets/img/food.png'
 import drinkFallback from '../assets/img/drink.png'
-import { checkSelfHostedUpdates } from '../utils/updater'
 import VideoSection from '../components/home/VideoSection.vue'
 import MenuCard from '../components/menu/MenuCard.vue'
+import MenuSearchField from '../components/menu/MenuSearchField.vue'
+import MenuTranslationIndex from '../components/menu/MenuTranslationIndex.vue'
 import ProductDetailDialog from '../components/menu/ProductDetailDialog.vue'
+import { getMenuSearchKey, normalizeMenuSearch } from '../utils/menuSearch'
 
 export default {
-  components: { MenuCard, ProductDetailDialog, VideoSection },
+  components: {
+    MenuCard,
+    MenuSearchField,
+    MenuTranslationIndex,
+    ProductDetailDialog,
+    VideoSection,
+  },
   data() {
     return {
       foodFallback,
@@ -22,6 +30,8 @@ export default {
       page_id: '',
       langue: 'Fr',
       menuType: 'Restaurant',
+      menuSearchQuery: '',
+      menuTranslatedNames: {},
       itemsToShow: 14, // Initial number of items to show
       statut: null,
       videos: '',
@@ -99,9 +109,6 @@ export default {
   },
   mounted() {
     this.$nextTick(() => {
-      // Check for self-hosted updates
-      checkSelfHostedUpdates()
-
       this.verifierReglages()
       if (this.chambre) {
         this.$store.dispatch('verifierOccupationChambre', this.chambre)
@@ -193,6 +200,9 @@ export default {
     menuType() {
       this.itemsToShow = 14 // Reset count when category changes
       this.translateCurrentDOM()
+    },
+    menuSearchQuery() {
+      this.itemsToShow = 14
     },
     page(newVal) {
       if (newVal === 'Menu') {
@@ -707,6 +717,9 @@ export default {
         .replace(/&#039;/g, "'")
       return text.replace(/\s+/g, ' ').trim()
     },
+    updateMenuTranslatedNames(translatedNames) {
+      this.menuTranslatedNames = translatedNames
+    },
   },
   computed: {
     lastKnownClientName() {
@@ -728,16 +741,48 @@ export default {
       return this.$store.getters.totalPanier || 0
     },
     articlesFiltresTotal() {
-      if (this.articles) {
-        return this.articles.filter((tache) => tache.source === this.menuType)
-      }
-      return []
+      if (!this.articles) return []
+
+      const normalizedQuery = normalizeMenuSearch(this.menuSearchQuery)
+
+      return this.articles.filter((article) => {
+        if (article.source !== this.menuType) return false
+        if (!normalizedQuery) return true
+
+        const translatedName =
+          this.langue === 'En' ? this.menuTranslatedNames[getMenuSearchKey(article)] : ''
+
+        return [article.nom, translatedName].some((name) =>
+          normalizeMenuSearch(name).includes(normalizedQuery),
+        )
+      })
     },
     articlesFiltres() {
       return this.articlesFiltresTotal.slice(0, this.itemsToShow)
     },
+    menuEmptyTitle() {
+      if (this.menuSearchQuery) {
+        return this.langue === 'En' ? 'No items found' : 'Aucun article trouvé'
+      }
+
+      return this.langue === 'En' ? 'No items available' : 'Aucun article disponible'
+    },
+    menuEmptyMessage() {
+      if (this.menuSearchQuery) {
+        return this.langue === 'En'
+          ? `No menu item matches “${this.menuSearchQuery}”.`
+          : `Aucun article ne correspond à « ${this.menuSearchQuery} ».`
+      }
+
+      return this.langue === 'En'
+        ? 'This category does not contain any items yet.'
+        : 'Cette catégorie ne contient pas encore d’article.'
+    },
     articles() {
       return this.$store.state.menus || []
+    },
+    menuSearchIndexItems() {
+      return this.articles.filter((article) => ['Restaurant', 'Bar'].includes(article.source))
     },
     selectedProductImage() {
       return this.getArticleImage(this.selectedMenuItem)
@@ -1266,8 +1311,44 @@ export default {
                 </div>
               </div>
 
+              <MenuSearchField
+                v-model="menuSearchQuery"
+                :language="langue"
+                :result-count="articlesFiltresTotal.length"
+              />
+
+              <MenuTranslationIndex
+                :items="menuSearchIndexItems"
+                :language="langue"
+                @indexed="updateMenuTranslatedNames"
+                @translation-needed="translateCurrentDOM"
+              />
+
               <div>
-                <div class="row q-col-gutter-md">
+                <div
+                  v-if="articlesFiltresTotal.length === 0"
+                  class="menu-search-empty notranslate"
+                  translate="no"
+                >
+                  <q-icon name="sym_o_search_off" size="38px" color="primary" />
+                  <div class="menu-search-empty__title">
+                    {{ menuEmptyTitle }}
+                  </div>
+                  <div class="menu-search-empty__message">
+                    {{ menuEmptyMessage }}
+                  </div>
+                  <q-btn
+                    v-if="menuSearchQuery"
+                    flat
+                    no-caps
+                    color="primary"
+                    icon="sym_o_close"
+                    :label="langue === 'En' ? 'Clear search' : 'Effacer la recherche'"
+                    @click="menuSearchQuery = ''"
+                  />
+                </div>
+
+                <div v-else class="row q-col-gutter-md">
                   <div
                     class="col-12 col-sm-6 col-md-4 col-lg-3"
                     v-for="(article, index) in articlesFiltres"
@@ -2938,6 +3019,33 @@ body {
 }
 
 /* Menu items fallback styling in case needed (leaving menu layout untouched) */
+.menu-search-empty {
+  display: grid;
+  width: min(100%, 620px);
+  min-height: 220px;
+  padding: 32px 24px;
+  margin: 0 auto;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  color: #606060;
+  text-align: center;
+  border: 1px dashed rgba(141, 22, 47, 0.24);
+  border-radius: 24px;
+  background: rgba(141, 22, 47, 0.035);
+}
+
+.menu-search-empty__title {
+  color: #282828;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.menu-search-empty__message {
+  margin-bottom: 6px;
+  font-size: 0.9rem;
+}
+
 .menu-type-card {
   border-radius: 20px;
   border: 1px solid rgba(141, 22, 47, 0.1);

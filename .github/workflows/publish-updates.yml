@@ -1,0 +1,239 @@
+name: Publier une mise à jour
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_kind:
+        description: Type de mise à jour
+        required: true
+        type: choice
+        options:
+          - web
+          - android
+      web_version:
+        description: Nouvelle version du bundle web (ex. 1.0.8)
+        required: true
+        type: string
+      min_native_build:
+        description: VersionCode Android minimal compatible
+        required: true
+        default: '4'
+        type: string
+      android_version:
+        description: Version APK (requis pour android, ex. 1.1.0)
+        required: false
+        type: string
+      android_version_code:
+        description: VersionCode APK strictement supérieur au précédent
+        required: false
+        type: string
+      mandatory:
+        description: Empêcher le bouton « Plus tard »
+        required: true
+        default: false
+        type: boolean
+      notes_fr:
+        description: Notes de version en français
+        required: false
+        type: string
+      notes_en:
+        description: Notes de version en anglais
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: villa-update-publication
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: updates-production
+    env:
+      UPDATE_BASE_URL: ${{ secrets.UPDATE_BASE_URL }}
+      UPDATE_FTP_HOST: ${{ secrets.UPDATE_FTP_HOST }}
+      UPDATE_FTP_PORT: ${{ secrets.UPDATE_FTP_PORT }}
+      UPDATE_FTP_USER: ${{ secrets.UPDATE_FTP_USER }}
+      UPDATE_FTP_PASSWORD: ${{ secrets.UPDATE_FTP_PASSWORD }}
+      WEB_VERSION: ${{ inputs.web_version }}
+      MIN_NATIVE_BUILD: ${{ inputs.min_native_build }}
+      RELEASE_KIND: ${{ inputs.release_kind }}
+      ANDROID_VERSION: ${{ inputs.android_version }}
+      ANDROID_VERSION_CODE: ${{ inputs.android_version_code }}
+      MANDATORY: ${{ inputs.mandatory }}
+      NOTES_FR: ${{ inputs.notes_fr }}
+      NOTES_EN: ${{ inputs.notes_en }}
+
+    steps:
+      - name: Récupérer le projet
+        uses: actions/checkout@v4
+
+      - name: Installer Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Installer Java
+        if: inputs.release_kind == 'android'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Installer les dépendances
+        run: npm ci
+
+      - name: Construire l’application web
+        run: npm run build
+
+      - name: Créer le bundle web Capgo
+        id: web_bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-output
+          bundle_name="villa-web-${WEB_VERSION}"
+          npx --yes @capgo/cli@latest bundle zip com.lavillastjean.villaApp \
+            --path ./dist --bundle "${WEB_VERSION}" --name "${bundle_name}"
+          bundle_source="$(find . -type f -name "${bundle_name}*.zip" -print -quit)"
+          test -n "${bundle_source}"
+          bundle_file="${bundle_name}.zip"
+          cp "${bundle_source}" "release-output/${bundle_file}"
+          bundle_checksum="$(sha256sum "release-output/${bundle_file}" | cut -d ' ' -f 1)"
+          echo "file=${bundle_file}" >> "${GITHUB_OUTPUT}"
+          echo "checksum=${bundle_checksum}" >> "${GITHUB_OUTPUT}"
+
+      - name: Vérifier les paramètres Android
+        if: inputs.release_kind == 'android'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${ANDROID_VERSION}"
+          test -n "${ANDROID_VERSION_CODE}"
+          [[ "${ANDROID_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]
+          [[ "${ANDROID_VERSION_CODE}" =~ ^[1-9][0-9]*$ ]]
+
+      - name: Préparer la clé de signature Android
+        if: inputs.release_kind == 'android'
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: echo "${ANDROID_KEYSTORE_BASE64}" | base64 --decode > android/app/release.keystore
+
+      - name: Synchroniser Capacitor
+        if: inputs.release_kind == 'android'
+        run: npx cap sync android
+
+      - name: Construire et signer l’APK
+        if: inputs.release_kind == 'android'
+        id: android_apk
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_PATH: release.keystore
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          chmod +x android/gradlew
+          android/gradlew -p android assembleRelease \
+            -PvillaVersionName="${ANDROID_VERSION}" \
+            -PvillaVersionCode="${ANDROID_VERSION_CODE}"
+          apk_file="villaapp-${ANDROID_VERSION}.apk"
+          cp android/app/build/outputs/apk/release/app-release.apk "release-output/${apk_file}"
+          apk_checksum="$(sha256sum "release-output/${apk_file}" | cut -d ' ' -f 1)"
+          echo "file=${apk_file}" >> "${GITHUB_OUTPUT}"
+          echo "checksum=${apk_checksum}" >> "${GITHUB_OUTPUT}"
+
+      - name: Télécharger le manifeste actuellement publié
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! curl --fail --silent --show-error \
+              "${UPDATE_BASE_URL%/}/version.json" \
+              --output release-output/current-version.json \
+            || ! node -e "JSON.parse(require('fs').readFileSync('release-output/current-version.json', 'utf8'))"; then
+            cp release/update-manifest.json release-output/current-version.json
+          fi
+
+      - name: Générer le manifeste web
+        if: inputs.release_kind == 'web'
+        shell: bash
+        run: |
+          node scripts/create-update-manifest.mjs \
+            --kind web \
+            --current release-output/current-version.json \
+            --output release-output/version.json \
+            --base-url "${UPDATE_BASE_URL}" \
+            --web-version "${WEB_VERSION}" \
+            --web-file "${{ steps.web_bundle.outputs.file }}" \
+            --web-checksum "${{ steps.web_bundle.outputs.checksum }}" \
+            --min-native-build "${MIN_NATIVE_BUILD}"
+
+      - name: Générer le manifeste Android
+        if: inputs.release_kind == 'android'
+        shell: bash
+        run: |
+          node scripts/create-update-manifest.mjs \
+            --kind android \
+            --current release-output/current-version.json \
+            --output release-output/version.json \
+            --base-url "${UPDATE_BASE_URL}" \
+            --web-version "${WEB_VERSION}" \
+            --web-file "${{ steps.web_bundle.outputs.file }}" \
+            --web-checksum "${{ steps.web_bundle.outputs.checksum }}" \
+            --min-native-build "${MIN_NATIVE_BUILD}" \
+            --android-version "${ANDROID_VERSION}" \
+            --android-version-code "${ANDROID_VERSION_CODE}" \
+            --apk-file "${{ steps.android_apk.outputs.file }}" \
+            --apk-checksum "${{ steps.android_apk.outputs.checksum }}" \
+            --mandatory "${MANDATORY}" \
+            --notes-fr "${NOTES_FR}" \
+            --notes-en "${NOTES_EN}"
+
+      - name: Publier les fichiers par FTPS puis le manifeste
+        shell: bash
+        run: |
+          set -euo pipefail
+          ftp_base="ftp://${UPDATE_FTP_HOST}:${UPDATE_FTP_PORT}"
+
+          upload_file() {
+            local source_file="$1"
+            local remote_file="$2"
+            curl --fail --silent --show-error \
+              --ssl-reqd \
+              --ftp-create-dirs \
+              --user "${UPDATE_FTP_USER}:${UPDATE_FTP_PASSWORD}" \
+              --upload-file "${source_file}" \
+              "${ftp_base}/${remote_file}"
+          }
+
+          upload_file \
+            "release-output/${{ steps.web_bundle.outputs.file }}" \
+            "bundles/${{ steps.web_bundle.outputs.file }}"
+
+          if [[ "${RELEASE_KIND}" == "android" ]]; then
+            upload_file \
+              "release-output/${{ steps.android_apk.outputs.file }}" \
+              "apk/${{ steps.android_apk.outputs.file }}"
+          fi
+
+          upload_file release-output/version.json version.json.next
+
+          curl --fail --silent --show-error \
+            --ssl-reqd \
+            --user "${UPDATE_FTP_USER}:${UPDATE_FTP_PASSWORD}" \
+            --quote "RNFR version.json.next" \
+            --quote "RNTO version.json" \
+            "${ftp_base}/"
+
+      - name: Conserver les fichiers produits
+        uses: actions/upload-artifact@v4
+        with:
+          name: villa-update-${{ inputs.release_kind }}-${{ inputs.web_version }}
+          path: release-output/
+          retention-days: 30
