@@ -11,6 +11,10 @@
       "androidSplashResourceName": "splash",
       "androidScaleType": "CENTER_INSIDE",
       "showSpinner": false
+    },
+    "CapacitorUpdater": {
+      "autoUpdate": false,
+      "statsUrl": ""
     }
   }
 }

@@ -8,6 +8,14 @@ const props = defineProps({
   },
   mandatory: Boolean,
   loading: Boolean,
+  phase: {
+    type: String,
+    default: 'idle',
+  },
+  progress: {
+    type: Number,
+    default: null,
+  },
   errorMessage: {
     type: String,
     default: '',
@@ -29,10 +37,42 @@ const releaseNotes = computed(() => {
   const notes = props.update?.releaseNotes ?? {}
   return isEnglish.value ? notes.en || notes.fr : notes.fr || notes.en
 })
+const showProgress = computed(() =>
+  ['downloading', 'preparing', 'permission', 'installing'].includes(props.phase),
+)
+const progressValue = computed(() =>
+  Number.isFinite(props.progress) ? Math.min(1, Math.max(0, props.progress)) : 0,
+)
+const progressPercentage = computed(() => Math.round(progressValue.value * 100))
+const isProgressIndeterminate = computed(
+  () => props.phase !== 'downloading' || !Number.isFinite(props.progress),
+)
+const statusLabel = computed(() => {
+  const messages = {
+    downloading: isEnglish.value
+      ? `Downloading… ${progressPercentage.value}%`
+      : `Téléchargement… ${progressPercentage.value} %`,
+    preparing: isEnglish.value
+      ? 'Checking the APK and preparing installation…'
+      : "Vérification de l'APK et préparation de l'installation…",
+    permission: isEnglish.value
+      ? 'Allow VillaApp to install updates, then return to the app.'
+      : "Autorisez VillaApp à installer les mises à jour, puis revenez dans l'application.",
+    installing: isEnglish.value
+      ? 'Opening the Android installer…'
+      : "Ouverture de l'installateur Android…",
+  }
+  return messages[props.phase] ?? ''
+})
+const actionLabel = computed(() => {
+  if (props.phase === 'ready') return isEnglish.value ? 'Install' : 'Installer'
+  return isEnglish.value ? 'Download' : 'Télécharger'
+})
+const actionIcon = computed(() => (props.phase === 'ready' ? 'system_update_alt' : 'download'))
 </script>
 
 <template>
-  <q-dialog v-model="isOpen" :persistent="mandatory">
+  <q-dialog v-model="isOpen" :persistent="mandatory || loading">
     <q-card class="app-update-card notranslate" translate="no">
       <q-card-section class="app-update-card__header">
         <div class="app-update-card__icon">
@@ -58,11 +98,25 @@ const releaseNotes = computed(() => {
           <p>{{ releaseNotes }}</p>
         </div>
 
+        <div v-if="showProgress" class="app-update-card__progress" role="status" aria-live="polite">
+          <div class="app-update-card__progress-label">
+            {{ statusLabel }}
+          </div>
+          <q-linear-progress
+            rounded
+            size="10px"
+            color="negative"
+            track-color="grey-3"
+            :value="progressValue"
+            :indeterminate="isProgressIndeterminate"
+          />
+        </div>
+
         <p class="app-update-card__hint">
           {{
             isEnglish
-              ? 'Android will ask you to confirm the installation after the download.'
-              : 'Android vous demandera de confirmer l’installation après le téléchargement.'
+              ? 'The download stays inside VillaApp. Android may ask you to confirm the installation.'
+              : 'Le téléchargement reste dans VillaApp. Android peut vous demander de confirmer l’installation.'
           }}
         </p>
 
@@ -84,9 +138,9 @@ const releaseNotes = computed(() => {
           unelevated
           no-caps
           color="negative"
-          icon="download"
+          :icon="actionIcon"
           :loading="loading"
-          :label="isEnglish ? 'Download' : 'Télécharger'"
+          :label="actionLabel"
           @click="emit('update')"
         />
       </q-card-actions>
@@ -162,6 +216,21 @@ const releaseNotes = computed(() => {
   margin-bottom: 0;
   color: #6d6d6d;
   font-size: 0.875rem;
+}
+
+.app-update-card__progress {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  margin: 18px 0;
+  border-radius: 12px;
+  background: #f7f7f7;
+}
+
+.app-update-card__progress-label {
+  color: #3b3b3b;
+  font-size: 0.875rem;
+  font-weight: 600;
 }
 
 .app-update-card__error {

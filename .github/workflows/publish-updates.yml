@@ -17,7 +17,7 @@ on:
       min_native_build:
         description: VersionCode Android minimal compatible
         required: true
-        default: '4'
+        default: '7'
         type: string
       android_version:
         description: Version APK (requis pour android, ex. 1.1.0)

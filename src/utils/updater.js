@@ -1,11 +1,9 @@
 import { App } from '@capacitor/app'
-import { Browser } from '@capacitor/browser'
 import { Capacitor } from '@capacitor/core'
 import { Preferences } from '@capacitor/preferences'
 import { CapacitorUpdater } from '@capgo/capacitor-updater'
 
-export const UPDATE_MANIFEST_URL =
-  'https://dashbaord.lavillastjean.com/updates/version.json'
+export const UPDATE_MANIFEST_URL = 'https://dashbaord.lavillastjean.com/updates/version.json'
 
 const ATTEMPTED_WEB_VERSION_KEY = 'update.attemptedWebVersion'
 const FAILED_WEB_VERSION_KEY = 'update.failedWebVersion'
@@ -205,12 +203,4 @@ export async function checkSelfHostedUpdates() {
     console.warn('[Updater] Vérification impossible, l’application continue normalement :', error)
     return { nativeUpdate: null, manifest: null, error }
   }
-}
-
-export async function openNativeUpdate(apkUrl) {
-  if (!Capacitor.isNativePlatform() || !/^https:\/\//i.test(apkUrl)) {
-    throw new Error('Lien APK invalide ou plateforme non prise en charge.')
-  }
-
-  await Browser.open({ url: apkUrl })
 }

@@ -1,6 +1,6 @@
 {
   "name": "VillaApp",
-  "version": "1.0.7",
+  "version": "1.1.2",
   "private": true,
   "type": "module",
   "scripts": {
@@ -14,7 +14,6 @@
   "dependencies": {
     "@capacitor/android": "^7.4.4",
     "@capacitor/app": "^7.1.2",
-    "@capacitor/browser": "^7.0.5",
     "@capacitor/cli": "^7.4.4",
     "@capacitor/core": "^7.4.4",
     "@capacitor/file-transfer": "^1.0.12",

@@ -1,7 +1,7 @@
 apply plugin: 'com.android.application'
 
-def villaVersionCode = Integer.parseInt((project.findProperty('villaVersionCode') ?: '4').toString())
-def villaVersionName = (project.findProperty('villaVersionName') ?: '1.0.7').toString()
+def villaVersionCode = Integer.parseInt((project.findProperty('villaVersionCode') ?: '7').toString())
+def villaVersionName = (project.findProperty('villaVersionName') ?: '1.1.2').toString()
 def releaseKeystorePath = System.getenv('ANDROID_KEYSTORE_PATH')
 
 android {

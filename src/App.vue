@@ -6,7 +6,9 @@ import { useAppUpdate } from '@/composables/useAppUpdate'
 const {
   nativeUpdate,
   isDialogOpen,
-  isOpeningDownload,
+  updatePhase,
+  downloadProgress,
+  isUpdateBusy,
   isMandatory,
   errorMessage,
   language,
@@ -26,7 +28,9 @@ const {
     v-model="isDialogOpen"
     :update="nativeUpdate"
     :mandatory="isMandatory"
-    :loading="isOpeningDownload"
+    :loading="isUpdateBusy"
+    :phase="updatePhase"
+    :progress="downloadProgress"
     :error-message="errorMessage"
     :language="language"
     @later="remindLater"
@@ -59,10 +63,12 @@ body {
 }
 
 /* Animations for page transitions */
-.fade-enter-active, .fade-leave-active {
+.fade-enter-active,
+.fade-leave-active {
   transition: opacity 0.3s ease;
 }
-.fade-enter-from, .fade-leave-to {
+.fade-enter-from,
+.fade-leave-to {
   opacity: 0;
 }
 
@@ -102,7 +108,8 @@ textarea,
 }
 
 /* Force all dialogs/overlays to sit on top of fixed menus/headers */
-.q-dialog, .q-dialog__inner {
+.q-dialog,
+.q-dialog__inner {
   z-index: 999999 !important;
 }
 .q-menu {

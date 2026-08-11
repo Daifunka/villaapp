@@ -3,7 +3,7 @@
 Le projet gère deux types de livraison :
 
 - **web** : écrans Vue, styles, textes, images et logique JavaScript. Le bundle est téléchargé en arrière-plan, vérifié par SHA-256 puis activé au redémarrage de l’application ;
-- **android** : plugins Capacitor, permissions, splash screen, configuration ou code Android. L’application affiche une fenêtre avec les notes de version et ouvre le téléchargement de l’APK.
+- **android** : plugins Capacitor, permissions, splash screen, configuration ou code Android. L’application affiche une fenêtre, télécharge l’APK avec une barre de progression, vérifie son empreinte SHA-256 puis lance l’installateur Android.
 
 ## 1. Configuration unique
 
@@ -99,16 +99,16 @@ Le fichier d’automatisation doit être présent sur la branche utilisée :
 
 ### Première publication et installation du nouveau système
 
-La version actuelle ajoute le plugin natif d’ouverture du navigateur. La première fois :
+La version actuelle ajoute le téléchargement et l’installation intégrés. Une dernière installation manuelle est nécessaire pour amorcer ce nouveau composant natif :
 
 1. poussez le projet et le workflow sur GitHub ;
 2. lancez le workflow avec `release_kind = android` ;
-3. utilisez `web_version = 1.1.0`, `android_version = 1.1.0`, `android_version_code = 5` et `min_native_build = 5` ;
+3. utilisez `web_version = 1.1.2`, `android_version = 1.1.2`, `android_version_code = 7` et `min_native_build = 7` ;
 4. laissez `mandatory = false` ;
 5. renseignez les notes de version en français et en anglais ;
 6. récupérez l’APK dans l’artefact GitHub Actions ou à l’URL publiée ;
 7. installez-le manuellement sur chaque tablette **sans désinstaller** l’application existante ;
-8. acceptez, si Android le demande, l’autorisation d’installer des applications provenant du navigateur utilisé ;
+8. pour cette version d’amorçage uniquement, acceptez si nécessaire l’installation provenant du navigateur ;
 9. vérifiez ensuite que `version.json` affiche bien un document JSON.
 
 Cette étape d’amorçage n’est nécessaire qu’une fois.
@@ -132,7 +132,7 @@ Utilisez une mise à jour **web** si vous avez seulement changé des fichiers da
 3. Sélectionnez **Publier une mise à jour** puis **Run workflow**.
 4. Choisissez `web`.
 5. Saisissez une version **strictement supérieure** à la dernière, par exemple `1.1.1`, puis `1.1.2` après la première publication.
-6. Conservez `min_native_build = 5` tant que le bundle reste compatible avec le premier APK du nouveau système.
+6. Conservez `min_native_build = 7` tant que le bundle dépend du téléchargement APK intégré.
 7. Lancez et attendez que toutes les étapes deviennent vertes.
 8. Vérifiez l’URL `version.json`, puis ouvrez l’application sur une tablette connectée.
 
@@ -160,7 +160,7 @@ Procédure :
 9. Laissez **mandatory** désactivé dans le cas normal.
 10. Lancez le workflow et vérifiez son résultat.
 
-À la prochaine vérification, la fenêtre apparaît. **Télécharger** ouvre l’APK ; Android demande ensuite à l’utilisateur de confirmer l’installation. Le bouton **Plus tard** masque la proposition pendant 24 heures.
+À la prochaine vérification, la fenêtre apparaît. **Télécharger** conserve l’utilisateur dans VillaApp et affiche la progression. L’application vérifie ensuite l’empreinte SHA-256 et lance automatiquement l’installateur Android. La première fois, Android peut demander d’autoriser VillaApp comme source d’installation. Selon la version et la gestion de la tablette, Android peut encore exiger une confirmation système. Le bouton **Plus tard** masque la proposition pendant 24 heures.
 
 ### Quand utiliser « obligatoire »
 
