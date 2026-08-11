@@ -97,11 +97,11 @@ jobs:
           set -euo pipefail
           mkdir -p release-output
           bundle_name="villa-web-${WEB_VERSION}"
-          npx --yes @capgo/cli@latest bundle zip com.lavillastjean.villaApp \
-            --path ./dist --bundle "${WEB_VERSION}" --name "${bundle_name}"
-          bundle_source="$(find . -type f -name "${bundle_name}*.zip" -print -quit)"
-          test -n "${bundle_source}"
           bundle_file="${bundle_name}.zip"
+          npx --yes @capgo/cli@latest bundle zip com.lavillastjean.villaApp \
+            --path ./dist --bundle "${WEB_VERSION}" --name "${bundle_file}"
+          bundle_source="$(find . -type f -name "${bundle_file}" -print -quit)"
+          test -n "${bundle_source}"
           cp "${bundle_source}" "release-output/${bundle_file}"
           bundle_checksum="$(sha256sum "release-output/${bundle_file}" | cut -d ' ' -f 1)"
           echo "file=${bundle_file}" >> "${GITHUB_OUTPUT}"
