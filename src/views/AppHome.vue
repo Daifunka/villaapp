@@ -9,6 +9,7 @@ import MenuSearchField from '../components/menu/MenuSearchField.vue'
 import MenuTranslationIndex from '../components/menu/MenuTranslationIndex.vue'
 import ProductDetailDialog from '../components/menu/ProductDetailDialog.vue'
 import { getMenuSearchKey, normalizeMenuSearch } from '../utils/menuSearch'
+import { notifyNetworkUnavailable, resetNetworkNotification } from '../utils/networkStatus'
 
 export default {
   components: {
@@ -133,6 +134,8 @@ export default {
     window.addEventListener('scroll', this.queueScrollUpdate, { passive: true })
     window.addEventListener('resize', this.checkTabsScroll)
     window.addEventListener('online', this.handleOnlineTransition)
+    window.addEventListener('offline', this.handleOfflineTransition)
+    if (navigator.onLine === false) this.handleOfflineTransition()
 
     // Listen to Capacitor App state changes (background/foreground)
     this.appStateListener = App.addListener('appStateChange', ({ isActive }) => {
@@ -165,6 +168,7 @@ export default {
     window.removeEventListener('scroll', this.queueScrollUpdate)
     window.removeEventListener('resize', this.checkTabsScroll)
     window.removeEventListener('online', this.handleOnlineTransition)
+    window.removeEventListener('offline', this.handleOfflineTransition)
     const layout = document.querySelector('.q-layout')
     if (layout) {
       layout.removeEventListener('scroll', this.queueScrollUpdate)
@@ -701,7 +705,12 @@ export default {
     },
     handleOnlineTransition() {
       console.log('[Connection] Network connection restored. Re-fetching data...')
+      resetNetworkNotification()
       this.fetchAppData()
+    },
+    handleOfflineTransition() {
+      console.log('[Connection] Network connection unavailable.')
+      notifyNetworkUnavailable()
     },
     stripHtmlTags(html) {
       if (!html) return ''

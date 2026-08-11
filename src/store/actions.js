@@ -2,6 +2,35 @@ import { Preferences } from '@capacitor/preferences'
 import axios from 'axios'
 
 import { Loading, Notify } from 'quasar'
+import {
+  isNetworkUnavailable,
+  notifyNetworkUnavailable,
+  resetNetworkNotification,
+} from '../utils/networkStatus'
+
+const VIDEO_METADATA_CACHE_PREFIX = 'video-metadata-v1'
+
+const getVideoMetadataCacheKey = ({ page_id: pageId, page, langue }) =>
+  `${VIDEO_METADATA_CACHE_PREFIX}:${pageId ?? page}:${langue}`
+
+async function readCachedVideoMetadata(infos) {
+  const { value } = await Preferences.get({ key: getVideoMetadataCacheKey(infos) })
+  if (!value) return null
+
+  try {
+    return JSON.parse(value)
+  } catch {
+    return null
+  }
+}
+
+async function cacheVideoMetadata(infos, video) {
+  if (!video) return
+  await Preferences.set({
+    key: getVideoMetadataCacheKey(infos),
+    value: JSON.stringify(video),
+  })
+}
 
 const getLangue = () => localStorage.getItem('langue') || 'Fr'
 
@@ -77,6 +106,7 @@ testInstance.interceptors.request.use(
 instance.interceptors.response.use(
   (response) => {
     Loading.hide()
+    resetNetworkNotification()
 
     // Show success notification if explicitly requested or on specific methods
     if (
@@ -94,6 +124,11 @@ instance.interceptors.response.use(
   },
   (error) => {
     Loading.hide()
+
+    if (isNetworkUnavailable(error)) {
+      notifyNetworkUnavailable()
+      return Promise.reject(error)
+    }
 
     if (error.config && error.config.silentError === true) {
       return Promise.reject(error)
@@ -121,6 +156,7 @@ instance.interceptors.response.use(
 testInstance.interceptors.response.use(
   (response) => {
     Loading.hide()
+    resetNetworkNotification()
 
     // Show success notification if explicitly requested or on specific methods
     if (
@@ -138,6 +174,11 @@ testInstance.interceptors.response.use(
   },
   (error) => {
     Loading.hide()
+
+    if (isNetworkUnavailable(error)) {
+      notifyNetworkUnavailable()
+      return Promise.reject(error)
+    }
 
     if (error.config && error.config.silentError === true) {
       return Promise.reject(error)
@@ -392,10 +433,18 @@ export default {
       })
   },
 
-  fetchVideos({ commit }, infos) {
+  async fetchVideos({ commit }, infos) {
     // Clear previous states to avoid UI glitches
     commit('setVideos', '')
     commit('UNSET_ERROR')
+
+    if (navigator.onLine === false) {
+      notifyNetworkUnavailable()
+      const cachedVideo = await readCachedVideoMetadata(infos)
+      commit('setVideos', cachedVideo)
+      if (!cachedVideo) commit('SET_ERROR', getNotificationMessage('videoUnavailable'))
+      return cachedVideo
+    }
 
     return instance
       .get(
@@ -408,14 +457,16 @@ export default {
           showLoading: false, // We'll use a local loading state or the spinner in AppHome.vue instead of the global one for videos
         },
       )
-      .then((response) => {
+      .then(async (response) => {
         const videos = response.data.video
         commit('setVideos', videos)
+        await cacheVideoMetadata(infos, videos)
+        return videos
       })
-      .catch((error) => {
+      .catch(async (error) => {
         console.log(error)
-        const videos = null
-        commit('setVideos', videos)
+        const cachedVideo = await readCachedVideoMetadata(infos)
+        commit('setVideos', cachedVideo)
 
         // Show specific message for 404 or other errors ONLY on pages that contain a video
         const videoPages = ['Accueil', 'Chambres', 'Chambres2', 'Services', 'FAQs']
@@ -429,7 +480,8 @@ export default {
           })
         }
 
-        commit('SET_ERROR', getNotificationMessage('videoUnavailable'))
+        if (!cachedVideo) commit('SET_ERROR', getNotificationMessage('videoUnavailable'))
+        return cachedVideo
       })
   },
 

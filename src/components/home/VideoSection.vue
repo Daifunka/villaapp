@@ -2,6 +2,8 @@
 import { computed, useTemplateRef, watch } from 'vue'
 import { useVideoCache } from '@/composables/useVideoCache'
 
+const CACHE_DOWNLOAD_DELAY_SECONDS = 45
+
 const props = defineProps({
   baseUrl: { type: String, required: true },
   language: { type: String, required: true },
@@ -9,15 +11,13 @@ const props = defineProps({
   video: { type: [Object, String], default: null },
 })
 
-const { sourceUrl, isCached, resolve } = useVideoCache()
+const { sourceUrl, isCached, cache, resolve } = useVideoCache()
 const videoElement = useTemplateRef('videoElement')
+let requestedCacheKey = ''
 
 function togglePlayback(event) {
   const target = event.target
-  if (
-    target instanceof Element &&
-    target.closest('.plyr__controls, .plyr__control, .cache-badge')
-  ) {
+  if (target instanceof Element && target.closest('.plyr__controls, .plyr__control')) {
     return
   }
 
@@ -33,10 +33,27 @@ function togglePlayback(event) {
   video.pause()
 }
 
+function handlePlaybackProgress(event) {
+  const video = event.currentTarget
+  if (!video || isCached.value || !Number.isFinite(video.duration) || video.duration <= 0) return
+  if (video.currentTime < CACHE_DOWNLOAD_DELAY_SECONDS) return
+
+  const cacheKey = `${remoteUrl.value}::${cacheVersion.value}`
+  if (!remoteUrl.value || requestedCacheKey === cacheKey) return
+
+  requestedCacheKey = cacheKey
+  void cache(remoteUrl.value, cacheVersion.value).catch(() => undefined)
+}
+
 const remoteUrl = computed(() => {
   if (!props.video || !props.video.video_url) return ''
   if (/^https?:\/\//i.test(props.video.video_url)) return props.video.video_url
   return `${props.baseUrl.replace(/\/$/, '')}/${props.video.video_url.replace(/^\//, '')}`
+})
+
+const cacheVersion = computed(() => {
+  if (!props.video || typeof props.video !== 'object') return ''
+  return props.video.updated_at || props.video.created_at || ''
 })
 
 const defaultDescriptions = {
@@ -64,7 +81,14 @@ const description = computed(() => {
   return sectionCopy[props.language]
 })
 
-watch(remoteUrl, (url) => void resolve(url), { immediate: true })
+watch(
+  [remoteUrl, cacheVersion],
+  ([url, version]) => {
+    requestedCacheKey = ''
+    void resolve(url, version)
+  },
+  { immediate: true },
+)
 </script>
 
 <template>
@@ -81,20 +105,16 @@ watch(remoteUrl, (url) => void resolve(url), { immediate: true })
 
     <template v-else>
       <div class="video-frame" @click.capture="togglePlayback">
-        <vue-plyr class="video-player">
+        <vue-plyr v-if="sourceUrl" :key="sourceUrl" class="video-player">
           <video
             ref="videoElement"
             playsinline
             controls
-            crossorigin
             preload="metadata"
             :src="sourceUrl"
+            @timeupdate="handlePlaybackProgress"
           />
         </vue-plyr>
-        <span v-if="isCached" class="cache-badge">
-          <q-icon name="sym_o_offline_pin" size="16px" aria-hidden="true" />
-          {{ language === 'En' ? 'Available offline' : 'Disponible hors connexion' }}
-        </span>
       </div>
 
       <div class="video-context notranslate" translate="no">
@@ -133,21 +153,6 @@ watch(remoteUrl, (url) => void resolve(url), { immediate: true })
 .video-frame :deep(.plyr__video-wrapper) {
   width: 100%;
   height: 100%;
-}
-
-.cache-badge {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  display: inline-flex;
-  gap: 5px;
-  align-items: center;
-  padding: 6px 10px;
-  color: #fff;
-  font-size: 12px;
-  font-weight: 700;
-  background: rgba(20, 20, 20, 0.78);
-  border-radius: 999px;
 }
 
 .video-context {
