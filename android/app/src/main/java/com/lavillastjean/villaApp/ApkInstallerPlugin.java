@@ -1,14 +1,13 @@
 package com.lavillastjean.villaApp;
 
-import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
-import android.content.pm.PackageInstaller;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.provider.Settings;
+import androidx.core.content.FileProvider;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -17,7 +16,6 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.net.URI;
 import java.security.MessageDigest;
 import java.util.Locale;
@@ -54,7 +52,7 @@ public class ApkInstallerPlugin extends Plugin {
             File apkFile = resolveTrustedApk(path);
             verifyChecksum(apkFile, expectedSha256);
             verifyPackage(apkFile);
-            commitInstallSession(apkFile);
+            openAndroidInstaller(apkFile);
 
             JSObject result = new JSObject();
             result.put("started", true);
@@ -142,39 +140,22 @@ public class ApkInstallerPlugin extends Plugin {
         }
     }
 
-    private void commitInstallSession(File apkFile) throws Exception {
+    private void openAndroidInstaller(File apkFile) {
         Context context = getContext();
-        PackageInstaller installer = context.getPackageManager().getPackageInstaller();
-        PackageInstaller.SessionParams params = new PackageInstaller.SessionParams(
-            PackageInstaller.SessionParams.MODE_FULL_INSTALL
+        Uri apkUri = FileProvider.getUriForFile(
+            context,
+            context.getPackageName() + ".fileprovider",
+            apkFile
         );
-        params.setAppPackageName(context.getPackageName());
-        params.setSize(apkFile.length());
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            params.setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED);
+
+        Intent installIntent = new Intent(Intent.ACTION_VIEW)
+            .setDataAndType(apkUri, "application/vnd.android.package-archive")
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+
+        if (installIntent.resolveActivity(context.getPackageManager()) == null) {
+            throw new IllegalStateException("Aucun installateur APK n'est disponible sur cet appareil.");
         }
 
-        int sessionId = installer.createSession(params);
-        try (PackageInstaller.Session session = installer.openSession(sessionId);
-             InputStream input = new FileInputStream(apkFile);
-             OutputStream output = session.openWrite("villa-update.apk", 0, apkFile.length())) {
-            byte[] buffer = new byte[1024 * 1024];
-            int count;
-            while ((count = input.read(buffer)) != -1) {
-                output.write(buffer, 0, count);
-            }
-            session.fsync(output);
-
-            Intent callbackIntent = new Intent(context, ApkInstallReceiver.class);
-            int flags = PendingIntent.FLAG_UPDATE_CURRENT;
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                flags |= PendingIntent.FLAG_MUTABLE;
-            }
-            PendingIntent callback = PendingIntent.getBroadcast(context, sessionId, callbackIntent, flags);
-            session.commit(callback.getIntentSender());
-        } catch (Exception error) {
-            installer.abandonSession(sessionId);
-            throw error;
-        }
+        context.startActivity(installIntent);
     }
 }
