@@ -6,23 +6,33 @@ import App from './App.vue'
 import { notifyAppReady } from './utils/updater'
 import router from './router'
 import store from './store'
-import VCalendar from 'v-calendar';
-import 'v-calendar/style.css';
 import i18n from './i18n'
 import VuePlyr from 'vue-plyr'
 import 'vue-plyr/dist/vue-plyr.css'
 import { Quasar, Notify, Loading, Dialog } from 'quasar'
 import quasarLang from 'quasar/lang/fr'
 import '@quasar/extras/material-icons/material-icons.css'
-import '@quasar/extras/material-icons-outlined/material-icons-outlined.css'
 import '@quasar/extras/material-symbols-outlined/material-symbols-outlined.css'
 import 'quasar/src/css/index.sass'
 
 const app = createApp(App)
 app.use(store)
 app.use(router)
-app.use(VCalendar, {});
 app.use(i18n)
+app.use(VuePlyr, {
+  plyr: {
+    controls: [
+      'play-large',
+      'play',
+      'progress',
+      'current-time',
+      'mute',
+      'volume',
+      'settings',
+      'fullscreen',
+    ],
+  },
+})
 
 // Configure Notify defaults for a premium look
 Notify.setDefaults({
@@ -48,14 +58,6 @@ app.use(Quasar, {
   },
   lang: quasarLang
 })
-  app.use(VuePlyr, {
-    plyr: {
-      controls: [
-        'play-large', 'play', 'progress', 'current-time', 
-        'mute', 'volume', 'settings', 'fullscreen'
-      ]
-    }
-  })
   const splashStartedAt = performance.now()
   let splashHidden = false
 

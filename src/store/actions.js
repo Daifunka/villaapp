@@ -318,9 +318,9 @@ export default {
   },
 
   verifierOccupationChambre: ({ commit, state, dispatch }, chambre) => {
-    if (!chambre) return
-    instance
-      .get('/reservations', { silentError: true, showLoading: false })
+    if (!chambre) return Promise.resolve(null)
+    return instance
+      .get('/reservations', { silentError: true, showLoading: false, timeout: 10000 })
       .then((response) => {
         const reservations = response.data.reservations || []
 
@@ -335,8 +335,13 @@ export default {
             month: '2-digit',
             day: '2-digit',
           }
-          const parts = new Intl.DateTimeFormat('en-CA', optionsDate).format(now).split('-')
-          beninDateStr = `${parts[0]}-${parts[1]}-${parts[2]}`
+          const dateParts = new Intl.DateTimeFormat('en-CA', optionsDate)
+            .formatToParts(now)
+            .reduce((parts, part) => {
+              if (part.type !== 'literal') parts[part.type] = part.value
+              return parts
+            }, {})
+          beninDateStr = `${dateParts.year}-${dateParts.month}-${dateParts.day}`
 
           const optionsHour = { timeZone: 'Africa/Porto-Novo', hour: 'numeric', hour12: false }
           beninHour = parseInt(new Intl.DateTimeFormat('en-US', optionsHour).format(now), 10)
@@ -377,7 +382,7 @@ export default {
             .toLowerCase()
             .replace(/(?:^|\s|-)\S/g, (char) => char.toUpperCase())
           commit('SET_LAST_KNOWN_CLIENT_NAME', formattedName || 'Client')
-          return
+          return activeRes
         }
 
         // Sinon, si la date actuelle coïncide avec la date de fin d'une réservation (check_out === today) ET qu'il est >= 13h

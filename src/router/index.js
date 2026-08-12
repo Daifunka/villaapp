@@ -1,7 +1,4 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import AppHeader from '@/components/AppHeader.vue';
-import AppFooter from '@/components/AppFooter.vue';
-import AppProfil from '@/views/AppProfil.vue';
 import AppHome from '@/views/AppHome.vue';
 
 const router = createRouter({
@@ -10,20 +7,12 @@ const router = createRouter({
     {
       path: '/',
       name: 'home',
-      components: {
-        default: AppHome,
-        header: AppHeader,
-        footer: AppFooter
-      },
+      component: AppHome,
     },
     {
       path: '/profil',
       name: 'AppProfil',
-      components: {
-        default: AppProfil,
-        header: AppHeader,
-        footer: AppFooter
-      },
+      component: () => import('@/views/AppProfil.vue'),
     },
   ],
 })

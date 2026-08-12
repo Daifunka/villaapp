@@ -43,6 +43,12 @@ const {
 body {
   overflow-x: hidden;
 }
+
+html.app-paused *,
+html.app-paused *::before,
+html.app-paused *::after {
+  animation-play-state: paused !important;
+}
 .premium-toast {
   border-radius: 12px !important;
   backdrop-filter: blur(10px);

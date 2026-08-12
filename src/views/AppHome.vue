@@ -69,6 +69,9 @@ export default {
       visibilityListener: null,
       scrollFrame: null,
       pendingScrollTop: 0,
+      appDataPromise: null,
+      lastAppDataFetchAt: 0,
+      isClientIdentityReady: false,
     }
   },
   async created() {
@@ -104,16 +107,28 @@ export default {
       this.nomChambre = chambreValue
     }
 
+    if (this.chambre) {
+      const maxAttempts = 3
+      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        const activeReservation = await this.$store.dispatch(
+          'verifierOccupationChambre',
+          this.chambre,
+        )
+        if (activeReservation) break
+        if (attempt < maxAttempts - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 750 * (attempt + 1)))
+        }
+      }
+    }
+    this.isClientIdentityReady = true
+
     // 2. Dispatch des Actions Vuex
     this.$store.dispatch('chargerPanierDepuisPreferences')
-    this.fetchAppData()
+    void this.fetchAppData({ skipOccupation: true })
   },
   mounted() {
     this.$nextTick(() => {
       this.verifierReglages()
-      if (this.chambre) {
-        this.$store.dispatch('verifierOccupationChambre', this.chambre)
-      }
       // Automatiquement traduire en anglais si la langue de préférence est l'anglais
       if (this.langue === 'En') {
         setTimeout(() => {
@@ -139,29 +154,34 @@ export default {
 
     // Listen to Capacitor App state changes (background/foreground)
     this.appStateListener = App.addListener('appStateChange', ({ isActive }) => {
+      document.documentElement.classList.toggle('app-paused', !isActive)
       if (isActive) {
         console.log('[Capacitor] App became active. Refreshing data...')
-        this.fetchAppData()
+        void this.fetchAppData()
       }
     })
 
     // Listen to Web Visibility API (tab focus change)
     this.visibilityListener = () => {
-      if (document.visibilityState === 'visible') {
+      const isVisible = document.visibilityState === 'visible'
+      document.documentElement.classList.toggle('app-paused', !isVisible)
+      if (isVisible) {
         console.log('[Browser] Visibility status: active. Refreshing data...')
-        this.fetchAppData()
+        void this.fetchAppData()
       }
     }
     document.addEventListener('visibilitychange', this.visibilityListener)
 
     // Shortened polling intervals to keep backend data updated dynamically (every 5 minutes)
     this.occupationInterval = setInterval(() => {
-      if (this.chambre) {
+      if (document.visibilityState === 'visible' && this.chambre) {
         this.$store.dispatch('verifierOccupationChambre', this.chambre)
       }
     }, 300000) // 5 minutes
     this.annonceInterval = setInterval(() => {
-      this.$store.dispatch('fetchAnnonce')
+      if (document.visibilityState === 'visible') {
+        this.$store.dispatch('fetchAnnonce')
+      }
     }, 300000) // 5 minutes
   },
   unmounted() {
@@ -191,6 +211,7 @@ export default {
     if (this.scrollFrame) {
       cancelAnimationFrame(this.scrollFrame)
     }
+    document.documentElement.classList.remove('app-paused')
   },
   watch: {
     '$store.state.videos'(newCategories) {
@@ -235,7 +256,7 @@ export default {
     },
     chambre(newVal) {
       this.translateCurrentDOM()
-      if (newVal) {
+      if (newVal && this.isClientIdentityReady) {
         this.$store.dispatch('verifierOccupationChambre', newVal)
         this.$store.dispatch('fetchAnnonce')
       }
@@ -248,8 +269,6 @@ export default {
     },
     lastKnownClientName(newVal, oldVal) {
       if (newVal !== oldVal) {
-        sessionStorage.removeItem('welcomeGateShown')
-        this.showWelcomeGate = true
         this.$store.dispatch('fetchAnnonce')
       }
     },
@@ -642,6 +661,7 @@ export default {
       }
     },
     closeWelcomeGate() {
+      if (!this.isClientIdentityReady) return
       this.showWelcomeGate = false
       sessionStorage.setItem('welcomeGateShown', 'true')
     },
@@ -687,26 +707,42 @@ export default {
           })
       }
     },
-    fetchAppData() {
+    fetchAppData({ force = false, skipOccupation = false } = {}) {
+      if (this.appDataPromise) return this.appDataPromise
+
+      const now = Date.now()
+      if (!force && now - this.lastAppDataFetchAt < 15000) return Promise.resolve()
+
+      this.lastAppDataFetchAt = now
+      const requests = [
+        this.$store.dispatch('fetchMenus'),
+        this.$store.dispatch('fetchDynamicPages'),
+        this.$store.dispatch('fetchFaqs'),
+        this.$store.dispatch('fetchAnnonce'),
+      ]
+
       if (this.page !== 'Menu' && this.page !== 'Cart' && this.page !== 'Commandes') {
-        this.$store.dispatch('fetchVideos', {
-          page_id: this.currentPageId,
-          page: this.page,
-          langue: this.langue,
-        })
+        requests.push(
+          this.$store.dispatch('fetchVideos', {
+            page_id: this.currentPageId,
+            page: this.page,
+            langue: this.langue,
+          }),
+        )
       }
-      this.$store.dispatch('fetchMenus')
-      this.$store.dispatch('fetchDynamicPages')
-      this.$store.dispatch('fetchFaqs')
-      this.$store.dispatch('fetchAnnonce')
-      if (this.chambre) {
-        this.$store.dispatch('verifierOccupationChambre', this.chambre)
+      if (this.chambre && !skipOccupation) {
+        requests.push(this.$store.dispatch('verifierOccupationChambre', this.chambre))
       }
+
+      this.appDataPromise = Promise.allSettled(requests).finally(() => {
+        this.appDataPromise = null
+      })
+      return this.appDataPromise
     },
     handleOnlineTransition() {
       console.log('[Connection] Network connection restored. Re-fetching data...')
       resetNetworkNotification()
-      this.fetchAppData()
+      void this.fetchAppData({ force: true })
     },
     handleOfflineTransition() {
       console.log('[Connection] Network connection unavailable.')
@@ -915,7 +951,10 @@ export default {
 
             <!-- Personalized Greeting -->
             <div class="welcome-gate-greeting text-serif q-px-lg">
-              <template v-if="lastKnownClientName">
+              <template v-if="!isClientIdentityReady">
+                <q-spinner-tail color="white" size="44px" aria-label="Chargement du client" />
+              </template>
+              <template v-else-if="lastKnownClientName">
                 <span class="greeting-pre anim-pre">{{
                   langue === 'En' ? 'Hello Dear' : 'Bonjour Cher(e)'
                 }}</span>
@@ -1025,6 +1064,7 @@ export default {
             <div class="btn-container q-mt-lg anim-btn">
               <q-btn
                 :label="langue === 'En' ? 'Continue' : 'Continuer'"
+                :ripple="false"
                 unelevated
                 rounded
                 class="enter-app-btn text-weight-bold"
@@ -1082,6 +1122,7 @@ export default {
               <div class="row justify-center q-pt-md flex-shrink-0">
                 <q-btn
                   :label="langue === 'En' ? 'Continue' : 'Continuer'"
+                  :ripple="false"
                   unelevated
                   rounded
                   class="enter-app-btn text-weight-bold"
@@ -2318,16 +2359,34 @@ body {
   opacity: 0.7;
 }
 
-/* Custom Fade & Zoom Transition for the Gate */
-.fade-gate-enter-active,
-.fade-gate-leave-active {
-  transition: all 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+/* Compositor-only gate transition for older Android GPUs */
+.fade-gate-enter-active {
+  transition: opacity 0.32s ease-out;
 }
-.fade-gate-enter-from,
-.fade-gate-leave-to {
+
+.fade-gate-enter-from {
   opacity: 0;
-  transform: scale(1.06);
-  filter: blur(10px);
+}
+
+.fade-gate-leave-active {
+  pointer-events: none;
+  backface-visibility: hidden;
+  will-change: transform;
+  transition: transform 0.52s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.fade-gate-leave-to {
+  transform: translate3d(0, -100%, 0);
+}
+
+.fade-gate-leave-active .liquid-orb,
+.fade-gate-leave-active .decorative-ring,
+.fade-gate-leave-active .welcome-gate-glass::before {
+  animation-play-state: paused;
+}
+
+.welcome-gate-overlay.fade-gate-leave-active::before {
+  animation-play-state: paused;
 }
 
 /* Luxury Staggered Entrance Animations */

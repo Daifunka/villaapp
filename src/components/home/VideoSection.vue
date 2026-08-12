@@ -1,5 +1,5 @@
 <script setup>
-import { computed, useTemplateRef, watch } from 'vue'
+import { computed, shallowRef, useTemplateRef, watch } from 'vue'
 import { useVideoCache } from '@/composables/useVideoCache'
 
 const CACHE_DOWNLOAD_DELAY_SECONDS = 45
@@ -13,7 +13,12 @@ const props = defineProps({
 
 const { sourceUrl, isCached, cache, resolve } = useVideoCache()
 const videoElement = useTemplateRef('videoElement')
+const hasPlaybackStarted = shallowRef(false)
 let requestedCacheKey = ''
+
+function handlePlaybackStarted() {
+  hasPlaybackStarted.value = true
+}
 
 function togglePlayback(event) {
   const target = event.target
@@ -85,6 +90,7 @@ watch(
   [remoteUrl, cacheVersion],
   ([url, version]) => {
     requestedCacheKey = ''
+    hasPlaybackStarted.value = false
     void resolve(url, version)
   },
   { immediate: true },
@@ -105,6 +111,13 @@ watch(
 
     <template v-else>
       <div class="video-frame" @click.capture="togglePlayback">
+        <div
+          v-show="!hasPlaybackStarted"
+          class="video-preview-placeholder"
+          aria-hidden="true"
+        >
+          <q-icon class="video-preview-icon" name="play_arrow" size="42px" />
+        </div>
         <vue-plyr v-if="sourceUrl" :key="sourceUrl" class="video-player">
           <video
             ref="videoElement"
@@ -112,6 +125,7 @@ watch(
             controls
             preload="metadata"
             :src="sourceUrl"
+            @playing="handlePlaybackStarted"
             @timeupdate="handlePlaybackProgress"
           />
         </vue-plyr>
@@ -134,13 +148,34 @@ watch(
   position: relative;
   aspect-ratio: 16 / 9;
   overflow: hidden;
-  background: #160307;
+  background: #000;
   border: 1px solid rgba(141, 22, 47, 0.1);
   border-radius: 24px;
   box-shadow: 0 12px 30px rgba(34, 9, 15, 0.1);
 }
 
+.video-preview-placeholder {
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+  display: grid;
+  background: #000;
+  place-items: center;
+  pointer-events: none;
+}
+
+.video-preview-icon {
+  width: 66px;
+  height: 66px;
+  color: #fff;
+  background: #a40f31;
+  border-radius: 50%;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.35);
+}
+
 .video-player {
+  position: absolute;
+  inset: 0;
   display: block;
   width: 100%;
   height: 100%;
@@ -153,6 +188,23 @@ watch(
 .video-frame :deep(.plyr__video-wrapper) {
   width: 100%;
   height: 100%;
+}
+
+.video-frame :deep(.plyr) {
+  position: absolute;
+  inset: 0;
+}
+
+.video-frame :deep(.plyr__video-wrapper) {
+  aspect-ratio: auto !important;
+}
+
+.video-frame :deep(video) {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
 }
 
 .video-context {

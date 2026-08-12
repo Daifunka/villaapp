@@ -6,7 +6,7 @@ import vueDevTools from 'vite-plugin-vue-devtools'
 import { quasar, transformAssetUrls } from '@quasar/vite-plugin'
 
 // https://vite.dev/config/
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [
     vue({
       template: { transformAssetUrls }
@@ -14,11 +14,11 @@ export default defineConfig({
     quasar({
       sassVariables: fileURLToPath(new URL('./src/quasar-variables.sass', import.meta.url))
     }),
-    vueDevTools(),
-  ],
+    mode === 'development' && vueDevTools(),
+  ].filter(Boolean),
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url))
     },
   },
-})
+}))
