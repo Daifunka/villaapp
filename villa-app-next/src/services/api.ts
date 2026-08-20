@@ -1,7 +1,7 @@
 import type { Announcement, DynamicPage, Faq, MenuItem, VideoContent } from '@/types'
 
-const API_BASE = 'https://dashbaord.lavillastjean.com/api/public/api'
-const MEDIA_BASE = 'https://dashbaord.lavillastjean.com/api/public/'
+const API_BASE = 'https://testoikos.lavillastjean.com/api/public/api'
+const MEDIA_BASE = 'https://testoikos.lavillastjean.com/api/public/'
 const inflight = new Map<string, Promise<unknown>>()
 const cache = new Map<string, { expires: number; value: unknown }>()
 

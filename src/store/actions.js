@@ -52,8 +52,7 @@ const getNotificationMessage = (key) => {
 }
 
 const instance = axios.create({
-  baseURL: 'https://dashbaord.lavillastjean.com/api/public/api',
-  //baseURL: "https://testoikos.lavillastjean.com/api/public/api",
+  baseURL: 'https://testoikos.lavillastjean.com/api/public/api',
   headers: {
     'Content-Type': 'multipart/form-data',
     'Access-Control-Allow-Origin': '*',
@@ -203,7 +202,7 @@ testInstance.interceptors.response.use(
 )
 
 instance.defaults.headers.common['Access-Control-Allow-Origin'] =
-  'https://dashbaord.lavillastjean.com'
+  'https://testoikos.lavillastjean.com'
 instance.defaults.headers.common['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE'
 instance.defaults.headers.common['Access-Control-Allow-Headers'] =
   'Origin, Accept, Content-Type, Authorization'

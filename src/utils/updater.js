@@ -3,7 +3,7 @@ import { Capacitor } from '@capacitor/core'
 import { Preferences } from '@capacitor/preferences'
 import { CapacitorUpdater } from '@capgo/capacitor-updater'
 
-export const UPDATE_MANIFEST_URL = 'https://dashbaord.lavillastjean.com/updates/version.json'
+export const UPDATE_MANIFEST_URL = 'https://testoikos.lavillastjean.com/updates/version.json'
 
 const ATTEMPTED_WEB_VERSION_KEY = 'update.attemptedWebVersion'
 const FAILED_WEB_VERSION_KEY = 'update.failedWebVersion'
