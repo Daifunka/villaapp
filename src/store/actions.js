@@ -9,6 +9,7 @@ import {
 } from '../utils/networkStatus'
 
 const VIDEO_METADATA_CACHE_PREFIX = 'video-metadata-v1'
+const pendingVideoRequests = new Map()
 
 const getVideoMetadataCacheKey = ({ page_id: pageId, page, langue }) =>
   `${VIDEO_METADATA_CACHE_PREFIX}:${pageId ?? page}:${langue}`
@@ -290,7 +291,7 @@ export default {
           const errors = error.response.data.error
 
           for (const field in errors) {
-            if (errors.hasOwnProperty(field)) {
+            if (Object.prototype.hasOwnProperty.call(errors, field)) {
               errors[field].forEach((msg) => {
                 erreur += msg + '\n'
               })
@@ -344,7 +345,7 @@ export default {
 
           const optionsHour = { timeZone: 'Africa/Porto-Novo', hour: 'numeric', hour12: false }
           beninHour = parseInt(new Intl.DateTimeFormat('en-US', optionsHour).format(now), 10)
-        } catch (e) {
+        } catch {
           // Fallback en cas de problème de timezone ou de format
           const utcHour = now.getUTCHours()
           beninHour = (utcHour + 1) % 24 // Bénin est UTC+1
@@ -438,6 +439,10 @@ export default {
   },
 
   async fetchVideos({ commit }, infos) {
+    const requestKey = getVideoMetadataCacheKey(infos)
+    const pendingRequest = pendingVideoRequests.get(requestKey)
+    if (pendingRequest) return pendingRequest
+
     // Clear previous states to avoid UI glitches
     commit('setVideos', '')
     commit('UNSET_ERROR')
@@ -450,7 +455,7 @@ export default {
       return cachedVideo
     }
 
-    return instance
+    const request = instance
       .get(
         '/videos-chambres/' +
           (infos.page_id !== undefined && infos.page_id !== null ? infos.page_id : infos.page) +
@@ -459,6 +464,7 @@ export default {
         {
           silentError: true,
           showLoading: false, // We'll use a local loading state or the spinner in AppHome.vue instead of the global one for videos
+          timeout: 15000,
         },
       )
       .then(async (response) => {
@@ -487,6 +493,13 @@ export default {
         if (!cachedVideo) commit('SET_ERROR', getNotificationMessage('videoUnavailable'))
         return cachedVideo
       })
+
+    pendingVideoRequests.set(requestKey, request)
+    try {
+      return await request
+    } finally {
+      pendingVideoRequests.delete(requestKey)
+    }
   },
 
   async sauvegarderPanierDansPreferences({ state }) {

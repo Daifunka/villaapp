@@ -26,6 +26,7 @@
     "@fancyapps/ui": "^5.0.36",
     "@popperjs/core": "^2.11.8",
     "@quasar/extras": "^1.17.0",
+    "@sentry/capacitor": "^4.3.0",
     "@vueup/vue-quill": "^1.2.0",
     "axios": "^1.7.9",
     "fancybox": "^3.0.1",

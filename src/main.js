@@ -1,6 +1,7 @@
 
 import { createApp } from 'vue'
 import { Capacitor } from '@capacitor/core'
+import * as Sentry from '@sentry/capacitor'
 import { SplashScreen } from '@capacitor/splash-screen'
 import App from './App.vue'
 import { notifyAppReady } from './utils/updater'
@@ -14,6 +15,14 @@ import quasarLang from 'quasar/lang/fr'
 import '@quasar/extras/material-icons/material-icons.css'
 import '@quasar/extras/material-symbols-outlined/material-symbols-outlined.css'
 import 'quasar/src/css/index.sass'
+
+Sentry.init({
+  dsn: import.meta.env.VITE_SENTRY_DSN,
+  environment: Capacitor.isNativePlatform() ? 'android' : 'web',
+  release: `villaapp@${import.meta.env.VITE_APP_VERSION || 'unknown'}`,
+  tracesSampleRate: 0.1,
+  sendDefaultPii: false,
+})
 
 const app = createApp(App)
 app.use(store)

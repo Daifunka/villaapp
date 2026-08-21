@@ -1,5 +1,6 @@
 <script setup>
 import { computed, shallowRef, useTemplateRef, watch } from 'vue'
+import * as Sentry from '@sentry/capacitor'
 import { useVideoCache } from '@/composables/useVideoCache'
 
 const CACHE_DOWNLOAD_DELAY_SECONDS = 45
@@ -18,6 +19,40 @@ let requestedCacheKey = ''
 
 function handlePlaybackStarted() {
   hasPlaybackStarted.value = true
+  Sentry.addBreadcrumb({
+    category: 'video',
+    message: 'Lecture vidéo démarrée',
+    level: 'info',
+  })
+}
+
+function handleVideoWaiting(event) {
+  const video = event.currentTarget
+  Sentry.addBreadcrumb({
+    category: 'video',
+    message: 'Lecture vidéo en attente de données',
+    level: 'warning',
+    data: {
+      currentTime: Number.isFinite(video?.currentTime) ? Math.round(video.currentTime) : undefined,
+      bufferedSeconds: video?.buffered?.length
+        ? Math.round(video.buffered.end(video.buffered.length - 1) - video.currentTime)
+        : 0,
+    },
+  })
+}
+
+function handleVideoError(event) {
+  const video = event.currentTarget
+  Sentry.withScope((scope) => {
+    scope.setLevel('error')
+    scope.setContext('video', {
+      section: props.section,
+      cached: isCached.value,
+      currentTime: Number.isFinite(video?.currentTime) ? Math.round(video.currentTime) : undefined,
+      mediaErrorCode: video?.error?.code,
+    })
+    Sentry.captureMessage('Échec de lecture vidéo')
+  })
 }
 
 function togglePlayback(event) {
@@ -41,7 +76,16 @@ function togglePlayback(event) {
 function handlePlaybackProgress(event) {
   const video = event.currentTarget
   if (!video || isCached.value || !Number.isFinite(video.duration) || video.duration <= 0) return
-  if (video.currentTime < CACHE_DOWNLOAD_DELAY_SECONDS) return
+  if (video.currentTime < CACHE_DOWNLOAD_DELAY_SECONDS || !video.paused) return
+
+  requestVideoCache(event)
+}
+
+function requestVideoCache(event) {
+  if (isCached.value) return
+
+  const video = event?.currentTarget
+  if (video && !video.ended && video.currentTime < CACHE_DOWNLOAD_DELAY_SECONDS) return
 
   const cacheKey = `${remoteUrl.value}::${cacheVersion.value}`
   if (!remoteUrl.value || requestedCacheKey === cacheKey) return
@@ -127,6 +171,11 @@ watch(
             :src="sourceUrl"
             @playing="handlePlaybackStarted"
             @timeupdate="handlePlaybackProgress"
+            @pause="requestVideoCache"
+            @ended="requestVideoCache"
+            @waiting="handleVideoWaiting"
+            @stalled="handleVideoWaiting"
+            @error="handleVideoError"
           />
         </vue-plyr>
       </div>

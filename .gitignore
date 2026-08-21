@@ -30,3 +30,7 @@ android/app/release.keystore
 *.sw?
 
 *.tsbuildinfo
+
+# Local environment values
+.env.local
+.env.*.local

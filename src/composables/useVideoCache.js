@@ -8,6 +8,7 @@ const CACHE_DIRECTORY = 'video-cache'
 const MANIFEST_KEY = 'video-cache-manifest-v2'
 const LEGACY_MANIFEST_KEY = 'video-cache-manifest-v1'
 const MAX_CACHED_VIDEOS = 12
+const DOWNLOAD_RETRY_COUNT = 2
 const pendingDownloads = new Map()
 
 function hashUrl(value) {
@@ -101,12 +102,24 @@ async function downloadVideo(url, version) {
     await Filesystem.mkdir({ path: CACHE_DIRECTORY, directory: Directory.Data, recursive: true })
     const { uri } = await Filesystem.getUri({ path, directory: Directory.Data })
 
-    await FileTransfer.downloadFile({
-      url,
-      path: uri,
-      connectTimeout: 30_000,
-      readTimeout: 120_000,
-    })
+    let lastError
+    for (let attempt = 1; attempt <= DOWNLOAD_RETRY_COUNT; attempt += 1) {
+      try {
+        await FileTransfer.downloadFile({
+          url,
+          path: uri,
+          connectTimeout: 30_000,
+          readTimeout: 120_000,
+        })
+        lastError = null
+        break
+      } catch (error) {
+        lastError = error
+        await Filesystem.deleteFile({ path, directory: Directory.Data }).catch(() => undefined)
+      }
+    }
+
+    if (lastError) throw lastError
 
     const currentManifest = await readManifest()
     const obsoleteEntries = currentManifest.filter(
