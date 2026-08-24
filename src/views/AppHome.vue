@@ -69,9 +69,12 @@ export default {
       visibilityListener: null,
       scrollFrame: null,
       pendingScrollTop: 0,
+      swipeStartX: null,
+      swipeStartY: null,
       appDataPromise: null,
       lastAppDataFetchAt: 0,
       isClientIdentityReady: false,
+      appVersion: import.meta.env.VITE_APP_VERSION || '1.1.5',
     }
   },
   async created() {
@@ -105,6 +108,13 @@ export default {
     if (chambreValue) {
       this.chambre = chambreValue
       this.nomChambre = chambreValue
+    }
+
+    try {
+      const appInfo = await App.getInfo()
+      this.appVersion = appInfo.version || appInfo.build || ''
+    } catch {
+      this.appVersion = import.meta.env.VITE_APP_VERSION || this.appVersion
     }
 
     if (this.chambre) {
@@ -233,6 +243,7 @@ export default {
       if (newVal === 'Menu') {
         this.itemsToShow = 14
       }
+      this.loadVideoForCurrentPage()
       // Tab change causes a full panel re-render with animation (~300ms)
       this.translateCurrentDOM()
       // Extra retry passes to catch content appearing after the animation completes
@@ -608,15 +619,52 @@ export default {
       } else {
         this.page = value
       }
+    },
+    handleSwipeStart(event) {
+      const currentPage = this.page === 'Chambres2' ? 'Chambres' : this.page
+      if (!this.swipeTabNames.includes(currentPage)) return
 
-      if (this.page !== 'Menu' && this.page !== 'Cart' && this.page !== 'Commandes') {
-        this.videos = ''
-        this.$store.dispatch('fetchVideos', {
-          page_id: this.currentPageId,
-          page: this.page,
-          langue: this.langue,
-        })
-      }
+      const touch = event.touches && event.touches[0]
+      if (!touch) return
+
+      this.swipeStartX = touch.clientX
+      this.swipeStartY = touch.clientY
+    },
+    handleSwipeEnd(event) {
+      if (this.swipeStartX === null || this.swipeStartY === null) return
+
+      const touch = event.changedTouches && event.changedTouches[0]
+      if (!touch) return
+
+      const deltaX = touch.clientX - this.swipeStartX
+      const deltaY = touch.clientY - this.swipeStartY
+      this.swipeStartX = null
+      this.swipeStartY = null
+
+      // Ignore vertical scrolling and short movements.
+      if (Math.abs(deltaX) < 50 || Math.abs(deltaX) <= Math.abs(deltaY)) return
+
+      const currentPage = this.page === 'Chambres2' ? 'Chambres' : this.page
+      const currentIndex = this.swipeTabNames.indexOf(currentPage)
+      if (currentIndex === -1) return
+
+      const nextIndex = currentIndex + (deltaX < 0 ? 1 : -1)
+      const nextPage = this.swipeTabNames[nextIndex]
+      if (nextPage) this.setPage(nextPage)
+    },
+    handleSwipeCancel() {
+      this.swipeStartX = null
+      this.swipeStartY = null
+    },
+    loadVideoForCurrentPage() {
+      if (['Menu', 'Cart', 'Commandes', 'Wifi'].includes(this.page)) return
+
+      this.videos = ''
+      void this.$store.dispatch('fetchVideos', {
+        page_id: this.currentPageId,
+        page: this.page,
+        langue: this.langue,
+      })
     },
     chargerPlusArticles() {
       this.itemsToShow += 14
@@ -864,11 +912,15 @@ export default {
         return { id: p && typeof p === 'object' ? p.id : null, name, label: labelStr }
       })
 
-      // Ajouter Menu (lien statique) juste à côté
-      mapped.push({ id: null, name: 'Menu', label: 'Au Menu' })
-      mapped.push({ id: null, name: 'Wifi', label: 'Wi-Fi' })
+      const uniqueMapped = mapped.filter(
+        (tab, index, tabs) => tabs.findIndex((candidate) => candidate.name === tab.name) === index,
+      )
 
-      return mapped
+      // Ajouter Menu (lien statique) juste à côté
+      uniqueMapped.push({ id: null, name: 'Menu', label: 'Au Menu' })
+      uniqueMapped.push({ id: null, name: 'Wifi', label: 'Wi-Fi' })
+
+      return uniqueMapped
     },
     dynamicTabNames() {
       const names = this.onglets.map((o) => o.name).filter((name) => name !== 'Menu' && name !== 'Wifi')
@@ -879,6 +931,9 @@ export default {
         }
       })
       return names
+    },
+    swipeTabNames() {
+      return this.onglets.map((tab) => tab.name)
     },
     currentPageId() {
       const currentTab = this.onglets.find((o) => o.name === this.page)
@@ -1269,7 +1324,13 @@ export default {
 
       <!-- Content Area -->
       <div class="q-px-lg q-pb-lg">
-        <q-tab-panels v-model="page" animated class="bg-transparent" swipeable>
+        <div
+          class="tab-panels-swipe-area"
+          @touchstart="handleSwipeStart"
+          @touchend="handleSwipeEnd"
+          @touchcancel="handleSwipeCancel"
+        >
+        <q-tab-panels v-model="page" animated class="bg-transparent">
           <!-- Tab: Default (Video) for dynamic page names -->
           <q-tab-panel v-for="t in dynamicTabNames" :key="t" :name="t" class="q-pa-none">
             <VideoSection
@@ -1700,6 +1761,7 @@ export default {
             </div>
           </q-tab-panel>
         </q-tab-panels>
+        </div>
       </div>
     </div>
 
@@ -1838,11 +1900,12 @@ export default {
         </q-card-section>
 
         <!-- Scrollable Body Content -->
-        <q-card-section class="col overflow-auto q-pa-lg">
+          <q-card-section class="col column no-wrap q-pa-lg" style="min-height: 0">
+            <div class="col overflow-auto" style="min-height: 0">
 
           <!-- Announcement Box -->
-          <div
-            v-if="annonce && (annonce.titre || annonce.texte)"
+            <div
+              v-if="annonce && (annonce.titre || annonce.texte)"
             class="q-pa-md bg-grey-1"
             style="border-radius: 20px; border: 1px solid rgba(0, 0, 0, 0.05)"
           >
@@ -1861,6 +1924,12 @@ export default {
               class="text-body2 text-grey-8 leading-relaxed wysiwyg-content"
               v-html="annonce.texte"
             ></div>
+          </div>
+
+            </div>
+
+          <div class="q-pt-md text-center text-caption text-grey-6">
+            <span class="text-weight-bold">Version - {{ appVersion }}</span>
           </div>
         </q-card-section>
       </q-card>
