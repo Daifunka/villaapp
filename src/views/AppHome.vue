@@ -75,6 +75,7 @@ export default {
       lastAppDataFetchAt: 0,
       isClientIdentityReady: false,
       appVersion: import.meta.env.VITE_APP_VERSION || '1.1.5',
+      cartNotifications: [],
     }
   },
   async created() {
@@ -221,6 +222,7 @@ export default {
     if (this.scrollFrame) {
       cancelAnimationFrame(this.scrollFrame)
     }
+    this.dismissCartNotifications()
     document.documentElement.classList.remove('app-paused')
   },
   watch: {
@@ -381,35 +383,76 @@ export default {
       this.selectedMenuItem = article
       this.showProductDialog = true
     },
-    ajouterPanier(article) {
+    async ajouterPanier(article) {
       this.success = false
       this.erreur = ''
       this.err = 'panier'
-      this.$store.dispatch('ajouterAuPanier', {
-        id: parseInt(article.id),
+      const productId = parseInt(article.id)
+
+      await this.$store.dispatch('ajouterAuPanier', {
+        id: productId,
         nom: article.nom,
         prix: article.prix,
         image: article.imageMenu,
         source: article.source,
         quantite: 1,
       })
-      this.$q.notify({
-        message: this.langue === 'En' ? `${article.nom} added to cart.` : `${article.nom} ajouté au panier.`,
-        icon: 'sym_o_shopping_bag',
-        position: 'top',
-        timeout: 4000,
-        classes: 'premium-cart-notify',
-        actions: [
-          {
-            label: this.langue === 'En' ? 'View Cart' : 'Voir le panier',
-            color: 'white',
-            class: 'text-weight-bold',
-            handler: () => {
-              this.setPage('Cart')
-            }
-          }
-        ]
+
+      const cartItem = this.panier.find((item) => item.id === productId)
+      const quantity = cartItem?.quantite || 1
+      this.showCartNotification(article.nom, productId, quantity)
+    },
+    showCartNotification(productName, productId, quantity) {
+      const existingNotification = this.cartNotifications.find(
+        (notification) => notification.productId === productId,
+      )
+
+      if (existingNotification) {
+        window.clearTimeout(existingNotification.timer)
+        existingNotification.quantity = quantity
+        existingNotification.timer = window.setTimeout(() => {
+          this.removeCartNotification(productId)
+        }, 4000)
+        return
+      }
+
+      while (this.cartNotifications.length >= 2) {
+        const oldestNotification = this.cartNotifications.shift()
+        window.clearTimeout(oldestNotification.timer)
+      }
+
+      const notification = {
+        id: `${productId}-${Date.now()}`,
+        productId,
+        productName,
+        quantity,
+        timer: null,
+      }
+      const timer = window.setTimeout(() => {
+        this.removeCartNotification(productId)
+      }, 4000)
+      notification.timer = timer
+      this.cartNotifications.push(notification)
+    },
+    getCartNotificationMessage(productName) {
+      return this.langue === 'En'
+        ? `${productName} added to cart.`
+        : `${productName} ajouté au panier.`
+    },
+    removeCartNotification(productId) {
+      const notificationIndex = this.cartNotifications.findIndex(
+        (notification) => notification.productId === productId,
+      )
+      if (notificationIndex === -1) return
+
+      const [notification] = this.cartNotifications.splice(notificationIndex, 1)
+      window.clearTimeout(notification.timer)
+    },
+    dismissCartNotifications() {
+      this.cartNotifications.forEach((notification) => {
+        window.clearTimeout(notification.timer)
       })
+      this.cartNotifications = []
     },
     confirmerViderPanier() {
       this.$q.dialog({
@@ -1230,7 +1273,16 @@ export default {
           <q-btn flat round dense class="custom-icon-btn" @click="setPage('Commandes')">
             <q-icon name="sym_o_receipt_long" size="md" />
           </q-btn>
-          <q-btn flat round dense class="custom-icon-btn" @click="setPage('Cart')">
+          <q-btn
+            flat
+            dense
+            no-caps
+            class="custom-icon-btn custom-cart-btn"
+            @click="setPage('Cart')"
+          >
+            <span class="custom-cart-btn__label notranslate" translate="no">
+              {{ langue === 'En' ? 'Cart' : 'Panier' }}
+            </span>
             <q-icon name="sym_o_shopping_bag" size="md" />
             <q-badge
               color="negative"
@@ -1497,7 +1549,13 @@ export default {
           <!-- Tab: Cart -->
           <q-tab-panel name="Cart" class="q-pa-none q-mb-lg">
             <div class="row justify-between items-center q-mb-lg">
-              <div class="text-h4 text-weight-bold q-my-none" style="color: #8d162f">Panier</div>
+              <div
+                class="text-h4 text-weight-bold q-my-none notranslate"
+                style="color: #8d162f"
+                translate="no"
+              >
+                {{ langue === 'En' ? 'Cart' : 'Panier' }}
+              </div>
               <q-btn
                 v-if="panier && panier.length > 0"
                 flat
@@ -1517,9 +1575,15 @@ export default {
               class="text-center q-pa-xl empty-state-container"
             >
               <q-img src="../assets/img/cart.png" width="120px" class="q-mb-md opacity-70" />
-              <div class="text-grey-7 text-h6 text-weight-medium">Votre panier est vide</div>
-              <div class="text-grey-5 q-mt-sm">
-                Découvrez nos délices dans l'onglet menu et commencez à commander.
+              <div class="text-grey-7 text-h6 text-weight-medium notranslate" translate="no">
+                {{ langue === 'En' ? 'Your cart is empty' : 'Votre panier est vide' }}
+              </div>
+              <div class="text-grey-5 q-mt-sm notranslate" translate="no">
+                {{
+                  langue === 'En'
+                    ? 'Discover our delights in the menu tab and start ordering.'
+                    : "Découvrez nos délices dans l'onglet menu et commencez à commander."
+                }}
               </div>
               <q-btn
                 label="Voir le menu"
@@ -1943,34 +2007,110 @@ export default {
         </div>
       </transition>
     </teleport>
+
+    <teleport to="body">
+      <transition-group name="cart-toast-fade" tag="div" class="cart-toast-stack">
+        <div
+          v-for="notification in cartNotifications"
+          :key="notification.id"
+          class="cart-toast"
+        >
+          <span class="cart-toast__quantity">{{ notification.quantity }}</span>
+          <q-icon name="sym_o_shopping_bag" class="cart-toast__icon" size="24px" />
+          <div class="cart-toast__message">
+            {{ getCartNotificationMessage(notification.productName) }}
+          </div>
+          <q-btn
+            flat
+            no-caps
+            dense
+            class="cart-toast__action"
+            :label="langue === 'En' ? 'View Cart' : 'Voir le panier'"
+            @click="setPage('Cart')"
+          />
+        </div>
+      </transition-group>
+    </teleport>
   </q-page>
 </template>
 
 <style>
-/* Premium custom style for select with white background and visible border */
-.premium-cart-notify {
-  background: #0B2B1B !important; /* Premium dark emerald green */
-  color: #ffffff !important;
-  border: 1px solid rgba(255, 255, 255, 0.15) !important;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3) !important;
-  border-radius: 12px !important;
-  padding: 12px 16px !important;
-  margin-top: 110px !important; /* Displace notification down to under header */
+.cart-toast-stack {
+  position: fixed;
+  top: 110px;
+  left: 50%;
+  z-index: 9500;
+  display: flex;
+  width: min(92vw, 560px);
+  transform: translateX(-50%);
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  pointer-events: none;
 }
-.premium-cart-notify .q-notification__message {
-  color: #ffffff !important;
-  font-family: 'Outfit', sans-serif !important;
-  font-weight: 600 !important;
-  font-size: 0.95rem !important;
+.cart-toast {
+  position: relative;
+  display: flex;
+  min-height: 56px;
+  align-items: center;
+  gap: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: #0b2b1b;
+  color: #ffffff;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+  padding: 10px 14px;
+  pointer-events: auto;
 }
-.premium-cart-notify .q-btn {
-  background: rgba(255, 255, 255, 0.12) !important;
-  border: 1px solid rgba(255, 255, 255, 0.2) !important;
-  border-radius: 8px !important;
-  padding: 4px 12px !important;
+.cart-toast__quantity {
+  position: absolute;
+  top: -8px;
+  left: -8px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #d92323;
+  color: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.78rem;
+  font-weight: 800;
+  line-height: 1;
+  box-shadow: 0 4px 10px rgba(217, 35, 35, 0.35);
+  z-index: 2;
 }
-.premium-cart-notify .q-icon {
-  color: #c5a880 !important; /* Elegant gold icon color */
+.cart-toast__icon {
+  flex: 0 0 auto;
+  color: #c5a880;
+}
+.cart-toast__message {
+  flex: 1 1 auto;
+  color: #ffffff;
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.cart-toast__action {
+  flex: 0 0 auto;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  font-weight: 700;
+  padding: 4px 12px;
+}
+.cart-toast-fade-enter-active,
+.cart-toast-fade-leave-active {
+  transition: opacity 0.28s ease;
+}
+.cart-toast-fade-enter-from,
+.cart-toast-fade-leave-to {
+  opacity: 0;
+}
+.cart-toast-fade-move {
+  transition: transform 0.22s ease;
 }
 .custom-select-white .q-field__control {
   background-color: #ffffff !important;
@@ -2687,6 +2827,19 @@ body {
   background: rgba(255, 255, 255, 0.28);
   border-color: rgba(255, 255, 255, 0.65);
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
+}
+.custom-cart-btn {
+  width: auto;
+  min-width: 94px;
+  padding: 0 12px !important;
+  border-radius: 24px;
+}
+.custom-cart-btn__label {
+  color: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+  margin-right: 6px;
 }
 .scrolled-nav .custom-icon-btn {
   color: #8d162f !important;
