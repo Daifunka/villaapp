@@ -52,6 +52,14 @@ const getNotificationMessage = (key) => {
   return messages[key] ? (isEn ? messages[key].En : messages[key].Fr) : ''
 }
 
+const hasCommandeSuccess = (data) => {
+  if (!data || typeof data !== 'object') return false
+  if (data.commande) return true
+  if (data.success === true) return true
+  if (data.success && typeof data.success === 'object' && data.success.commande) return true
+  return false
+}
+
 const instance = axios.create({
   baseURL: 'https://testoikos.lavillastjean.com/api/public/api',
   headers: {
@@ -251,9 +259,11 @@ export default {
     }
 
     try {
-      const response = await instance.post('/application-tablette/commande/ajouter', commandeInfos)
+      const response = await instance.post('/application-tablette/commande/ajouter', commandeInfos, {
+        silentSuccess: true,
+      })
 
-      if (response.data && response.data.commande) {
+      if (hasCommandeSuccess(response.data)) {
         commit('AJOUTER_COMMANDE_SESSION', commandePourHistorique)
         commit('SET_SUCCESS')
         await dispatch('viderLePanier')
@@ -262,8 +272,8 @@ export default {
         const isEn = getLangue().toLowerCase() === 'en'
         Notify.create({
           message: isEn
-            ? 'Your order has been placed successfully!'
-            : 'Votre commande a été enregistrée avec succès !',
+            ? 'Your order has been successfully registered.'
+            : 'Votre commande a bien été enregistrée.',
           position: 'top',
           timeout: 4000,
           classes: 'premium-toast',
