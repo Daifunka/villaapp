@@ -222,7 +222,7 @@ export default {
     }
   },
 
-  ajouterCommande: ({ commit, state, dispatch }, infos) => {
+  ajouterCommande: async ({ commit, state, dispatch }, infos) => {
     commit('UNSET_ERROR')
     commit('UNSET_SUCCESS')
 
@@ -234,75 +234,80 @@ export default {
       statut: 'Enregistrée',
     }
 
-    const articlesRestau = state.panier.filter((a) => a.source !== 'Bar')
-    const articlesBar = state.panier.filter((a) => a.source === 'Bar')
+    const articlesCommande = state.panier.map((article) => ({
+      id: article.id,
+      prix: article.prix,
+      quantite: article.quantite,
+    }))
 
-    const promises = []
+    if (articlesCommande.length === 0) {
+      return false
+    }
 
-    if (articlesRestau.length > 0) {
-      const restauInfos = {
-        ...infos,
-        source: 'Restaurant',
-        articles: articlesRestau,
+    const commandeInfos = {
+      ...infos,
+      source: 'Restaurant',
+      articles: articlesCommande,
+    }
+
+    try {
+      const response = await instance.post('/application-tablette/commande/ajouter', commandeInfos)
+
+      if (response.data && response.data.commande) {
+        commit('AJOUTER_COMMANDE_SESSION', commandePourHistorique)
+        commit('SET_SUCCESS')
+        await dispatch('viderLePanier')
+
+        // Notifier le client du succès de la commande
+        const isEn = getLangue().toLowerCase() === 'en'
+        Notify.create({
+          message: isEn
+            ? 'Your order has been placed successfully!'
+            : 'Votre commande a été enregistrée avec succès !',
+          position: 'top',
+          timeout: 4000,
+          classes: 'premium-toast',
+          icon: 'sym_o_check_circle',
+        })
+
+        return true
       }
-      promises.push(instance.post('/commande/ajouter', restauInfos))
-    }
 
-    if (articlesBar.length > 0) {
-      const barInfos = {
-        ...infos,
-        source: 'Bar',
-        articles: articlesBar,
+      const erreur = getNotificationMessage('errorTryAgain')
+      commit('SET_ERROR', erreur)
+      return false
+    } catch (error) {
+      const responseData = error.response?.data
+      const apiError = responseData?.erreur || responseData?.error
+
+      if (apiError) {
+        if (typeof apiError === 'string') {
+          commit('SET_ERROR', apiError)
+          return false
+        }
+
+        if (Array.isArray(apiError)) {
+          commit('SET_ERROR', apiError.join('\n'))
+          return false
+        }
+
+        if (typeof apiError === 'object') {
+          const messages = Object.values(apiError)
+            .flat()
+            .map((message) => String(message))
+            .join('\n')
+          commit('SET_ERROR', messages)
+          return false
+        }
+
+        commit('SET_ERROR', String(apiError))
+        return false
       }
-      promises.push(instance.post('/commande/ajouter', barInfos))
+
+      const erreur = getNotificationMessage('errorTryAgain')
+      commit('SET_ERROR', erreur)
+      return false
     }
-
-    if (promises.length === 0) {
-      return
-    }
-
-    Promise.all(promises)
-      .then(function (responses) {
-        const allSuccess = responses.every((response) => response.data && response.data.commande)
-        if (allSuccess) {
-          commit('AJOUTER_COMMANDE_SESSION', commandePourHistorique)
-          commit('SET_SUCCESS')
-          dispatch('viderLePanier')
-
-          // Notifier le client du succès de la commande
-          const isEn = getLangue().toLowerCase() === 'en'
-          Notify.create({
-            message: isEn
-              ? 'Your order has been placed successfully!'
-              : 'Votre commande a été enregistrée avec succès !',
-            position: 'top',
-            timeout: 4000,
-            classes: 'premium-cart-notify',
-            icon: 'sym_o_check_circle',
-          })
-        } else {
-          const erreur = getNotificationMessage('errorTryAgain')
-          commit('SET_ERROR', erreur)
-        }
-      })
-      .catch(function (error) {
-        if (error.response && error.response.data && error.response.data.error) {
-          let erreur = ''
-          const errors = error.response.data.error
-
-          for (const field in errors) {
-            if (Object.prototype.hasOwnProperty.call(errors, field)) {
-              errors[field].forEach((msg) => {
-                erreur += msg + '\n'
-              })
-            }
-          }
-          commit('SET_ERROR', erreur.trim())
-        } else {
-          const erreur = getNotificationMessage('errorTryAgain')
-          commit('SET_ERROR', erreur)
-        }
-      })
   },
 
   fetchArticles({ commit }) {

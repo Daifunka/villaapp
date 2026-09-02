@@ -321,7 +321,7 @@ export default {
     },
     async ajouterCommande() {
       this.showConfirmOrderModal = false
-      this.$store.dispatch('ajouterCommande', {
+      const commandeAjoutee = await this.$store.dispatch('ajouterCommande', {
         statut: 'en attente de paiement',
         statutPreparation: 'En attente',
         source: 'Restaurant',
@@ -330,6 +330,10 @@ export default {
         articles: this.panier,
         preferencesCommande: this.preference || '',
       })
+
+      if (commandeAjoutee) {
+        this.setPage('Commandes')
+      }
     },
     async verifierReglages() {
       const { value: blocValue } = await Preferences.get({ key: 'bloc' })
